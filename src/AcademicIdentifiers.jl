@@ -1,0 +1,629 @@
+module AcademicIdentifiers
+
+using StyledStrings: @styled_str as @S_str
+
+export AcademicIdentifier, DOI, ORCID, ROR, PMID, PMCID, ISSN, ISBN, Wikidata
+
+abstract type AcademicIdentifier end
+
+struct MalformedIdentifier{T <: AcademicIdentifier, I} <: Exception
+    input::I
+    problem::String
+end
+
+MalformedIdentifier{T}(input::I, problem::String) where {T, I} =
+    MalformedIdentifier{T, I}(input, problem)
+
+struct ChecksumViolation{T <: AcademicIdentifier, I} <: Exception
+    id::I
+    checksum::Integer
+    expected::Integer
+end
+
+ChecksumViolation{T}(id::I, checksum::Integer, expected::Integer) where {T, I} =
+    ChecksumViolation{T, I}(id, checksum, expected)
+
+function Base.showerror(io::IO, @nospecialize(ex::MalformedIdentifier{T})) where {T}
+    print(io, S"Malformed identifier: {bold:$T} identifier {emphasis:$(ex.input)} $(ex.problem)")
+end
+
+function Base.showerror(io::IO, @nospecialize(ex::ChecksumViolation{T})) where {T}
+    print(io, S"Checksum violation: the correct checksum for {bold:$T} identifier {emphasis:$(ex.id)} \
+                is {success:$(ex.expected)} but got {error:$(ex.checksum)}")
+end
+
+"""
+    baseid(id::AcademicIdentifier) -> Union{Integer, Nothing}
+
+If applicable, return the base identifier of an `AcademicIdentifier` object.
+"""
+function baseid(::AcademicIdentifier) end
+
+"""
+    checksum(id::AcademicIdentifier) -> Union{Integer, Nothing}
+
+If applicable, return the check digit of an `AcademicIdentifier` object.
+"""
+function checksum(::AcademicIdentifier) end
+
+
+# DOI
+
+"""
+    DOI <: AcademicIdentifier
+
+A Digital Object Identifier (DOI) is a unique identifier for a digital object such as a document or
+a dataset. It consists of a registrant prefix and an object suffix separated by a slash.
+
+# Examples
+
+```julia
+julia> DOI("10.1145/3276490")
+doi:10.1145/3276490
+
+julia> DOI("https://doi.org/10.1137/141000671")
+doi:10.1137/141000671
+
+julia> println(DOI("10.1145/3276490"))
+10.1145/3276490
+```
+"""
+struct DOI <: AcademicIdentifier
+    registrant::String
+    object::String
+end
+
+function DOI(doi::AbstractString)
+    ldoi = lowercase(doi)
+    for prefix in ("doi:", "doi.org/", "http://doi.org/", "https://doi.org/")
+        if startswith(ldoi, prefix)
+            return DOI(@view doi[ncodeunits(prefix)+1:end])
+        end
+    end
+    if '/' in doi
+        registrant, object = split(doi, '/', limit=2)
+        DOI(String(registrant), String(object))
+    else
+        DOI(String(doi), "")
+    end
+end
+
+function Base.print(io::IO, doi::DOI)
+    print(io, doi.registrant, '/', doi.object)
+end
+
+function Base.show(io::IO, ::MIME"text/plain", doi::DOI)
+    url = "https://doi.org/$(doi.registrant)/$(doi.object)"
+    print(io, S"{bold:doi:}{link=$url:$(doi.registrant)/$(doi.object)}")
+end
+
+
+# ORCID
+
+"""
+    ORCID <: AcademicIdentifier
+
+An Open Researcher and Contributor ID (ORCID) is a unique identifier for researchers and contributors
+to academic works. It consists of a 16-digit integer with a checksum digit.
+
+Invalid ORCID identifiers will throw a `MalformedIdentifier` exception, and identifiers with an
+incorrect checksum will throw a `ChecksumViolation` exception.
+
+# Examples
+
+```julia
+julia> ORCID("https://orcid.org/0000-0001-5109-3700")
+ORCID:https://orcid.org/0000-0001-5109-3700
+
+julia> println(ORCID("0000-0001-5109-3700"))
+https://orcid.org/0000-0001-5109-3700
+
+julia> ORCID("0000-0001-5109-3701")
+ERROR: Checksum violation: the correct checksum for ORCID identifier 15109370 is 0 but got 1
+````
+"""
+struct ORCID <: AcademicIdentifier
+    id::UInt64
+    function ORCID(id::Union{Int64, UInt64}, checksum::Integer)
+        ndigits(id) <= 16 || throw(MalformedIdentifier{ORCID}(id, "must be a 16-digit integer"))
+        digsum = 0
+        for dig in Iterators.reverse(digits(id))
+            digsum = (digsum + dig) * 2
+        end
+        checkcalc = (12 - digsum % 11) % 11
+        if checkcalc != checksum
+            throw(ChecksumViolation{ORCID}(id, checksum, checkcalc))
+        end
+        oid = UInt64(id) + UInt64(checksum) << 60
+        new(oid)
+    end
+end
+
+baseid(orcid::ORCID) = Int(orcid.id & 0x003fffffffffffff)
+checksum(orcid::ORCID) = Int8((orcid.id & 0xff00000000000000) >> 60)
+
+function ORCID(id::AbstractString)
+    lid = lowercase(id)
+    for prefix in ("orcid:", "orcid.org/", "https://orcid.org/")
+        if startswith(lid, prefix)
+            return ORCID(@view id[ncodeunits(prefix)+1:end])
+        end
+    end
+    orcdigits = replace(id, '-' => "")
+    if length(orcdigits) > 16
+        throw(MalformedIdentifier{ORCID}(id, "must be a 16-digit integer"))
+    end
+    iddigits..., checksum = orcdigits
+    id = parse(Int64, iddigits)
+    check = if uppercase(checksum) == 'X' 10 else parse(Int, checksum) end
+    ORCID(id, check)
+end
+
+function Base.print(io::IO, orcid::ORCID)
+    idstr, check = string(baseid(orcid)), checksum(orcid)
+    print(io, "https://orcid.org/")
+    join(io, Iterators.partition(lpad(idstr, 15, '0'), 4), '-')
+    print(io, if check == 10 'X' else check end)
+end
+
+function Base.show(io::IO, orcid::ORCID)
+    show(io, ORCID)
+    print(io, "(\"")
+    print(io, orcid)
+    print(io, "\")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", orcid::ORCID)
+    idstr, check = string(baseid(orcid)), checksum(orcid)
+    dashid = join(Iterators.partition(lpad(idstr, 15, '0'), 4), '-')
+    checkchar = if check == 10 'X' else check end
+    print(io, S"{bold:ORCID:}{link={https://orcid.org/$idstr}:$dashid{light,bright_magenta:$checkchar}}")
+end
+
+
+# ROR
+
+Base.@assume_effects :foldable function croc32decode(::Type{T}, str::AbstractString) where {T <: Integer}
+    svec = collect(codeunits(lowercase(str)))
+    skipchars = UInt8.(('i', 'l', 'o', 'u'))
+    svec .= svec .- (UInt8(count(s .> skipchars)) for s in svec)
+    parse(T, String(svec), base=32)
+end
+
+Base.@assume_effects :foldable function croc32encode(num::Integer)
+    svec = collect(codeunits(string(num, base=32)))
+    skipchars = UInt8.(('i', 'l'-1, 'o'-2, 'u'-3))
+    svec .= svec .+ (UInt8(count(s .>= skipchars)) for s in svec)
+    String(svec)
+end
+
+"""
+    ROR <: AcademicIdentifier
+
+A Research Organization Registry (ROR) identifier is a unique identifier for research organizations.
+It consists of a 6-digit integer with a checksum digit.
+
+Invalid ROR identifiers will throw a `MalformedIdentifier` exception, and identifiers with an
+incorrect checksum will throw a `ChecksumViolation` exception.
+
+# Examples
+
+```julia
+julia> ROR("https://ror.org/05cy4wa09")
+ROR:05cy4wa09
+
+julia> print(ROR("05cy4wa09"))
+https://ror.org/05cy4wa09
+
+julia> ROR("05cy4wa08")
+ERROR: Checksum violation: the correct checksum for ROR identifier 05cy4wa is 9 but got 8
+````
+"""
+struct ROR <: AcademicIdentifier
+    num::Int32
+    function ROR(num::Integer, check::Integer)
+        num >= 0 || throw(MalformedIdentifier{ROR}(num, "must be a non-negative value"))
+        num <= croc32decode(Int, "zzzzzz") || throw(MalformedIdentifier{ROR}(croc32encode(num), "must be no more than 6-digits"))
+        shouldcheck = 98 - ((num * 100) % 97)
+        if check != shouldcheck
+            throw(ChecksumViolation{ROR}('0' * croc32encode(num), check, shouldcheck))
+        end
+        new(Int32(num))
+    end
+end
+
+baseid(ror::ROR) = ror.num
+checksum(ror::ROR) = 98 - ((ror.num * 100) % 97)
+
+function ROR(num::AbstractString)
+    for prefix in ("ror:", "ror.org/", "https://ror.org/")
+        if startswith(lowercase(num), prefix)
+            return ROR(@view num[ncodeunits(prefix)+1:end])
+        end
+    end
+    if length(num) != 9
+        throw(MalformedIdentifier{ROR}(num, "must be 9 characters long"))
+    end
+    char0, rest... = num
+    if char0 != '0'
+        throw(MalformedIdentifier{ROR}(num, "must start with '0'"))
+    end
+    ROR(croc32decode(Int, view(rest, 1:6)), parse(Int, view(rest, 7:8)))
+end
+
+function Base.print(io::IO, ror::ROR)
+    print(io, "https://ror.org/")
+    print(io, croc32encode(ror.num))
+    print(io, lpad(checksum(ror), 2, '0'))
+end
+
+function Base.show(io::IO, ror::ROR)
+    show(io, ROR)
+    print(io, "(\"0")
+    print(io, croc32encode(ror.num), lpad(checksum(ror), 2, '0'))
+    print(io, "\")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", ror::ROR)
+    print(io, S"{bold:ROR:}{link={https://ror.org/$codestr}:0$(croc32encode(ror.num))\
+                {light,bright_magenta:$(lpad(checksum(ror), 2, '0'))}}")
+end
+
+
+# PMID
+
+"""
+    PMID <: AcademicIdentifier
+
+A PubMed Identifier (PMID) is a unique identifier for a publication in the
+PubMed database. It consists of an 8-digit integer. Invalid PMIDs will throw a
+`MalformedIdentifier` exception.
+
+PMID identifiers should not be confused with PubMed Central identifiers ([`PMCID`](@ref)s),
+which are specifically used by PubMed Central but are distinct from PMIDs.
+
+# Examples
+
+```julia
+julia> PMID(28984872)
+PMID:28984872
+
+julia> PMID("https://pubmed.ncbi.nlm.nih.gov/28984872")
+PMID:28984872
+
+julia> PMID(123456789)
+ERROR: Malformed identifier: PMID identifier 123456789 must be no more than 8 digits
+```
+"""
+struct PMID <: AcademicIdentifier
+    id::UInt
+    function PMID(id::Union{Int, UInt})
+        id >= 0 || throw(MalformedIdentifier{PMID}(id, "must be a non-negative value"))
+        id <= 10^8 || throw(MalformedIdentifier{PMID}(id, "must be no more than 8 digits"))
+        new(UInt(id))
+    end
+end
+
+baseid(pmid::PMID) = pmid.id
+
+function PMID(id::AbstractString)
+    lid = lowercase(id)
+    for prefix in ("pmid:", "pubmed.ncbi.nlm.nih.gov/", "https://pubmed.ncbi.nlm.nih.gov/")
+        if startswith(lid, prefix)
+            return PMID(@view id[ncodeunits(prefix)+1:end])
+        end
+    end
+    PMID(parse(UInt, id))
+end
+
+function Base.show(io::IO, ::MIME"text/plain", pmid::PMID)
+    print(io, S"{bold:PMID:}{link={https://pubmed.ncbi.nlm.nih.gov/$(pmid.id)}:$(pmid.id)}")
+end
+
+
+# PMCID
+
+"""
+    PMCID <: AcademicIdentifier
+
+A PubMed Central Identifier (PMCID) is a unique identifier for a publication in the
+PubMed Central database. It consists of an 8-digit integer. Invalid PMCIDs will throw a
+`MalformedIdentifier` exception.
+
+PMCID identifiers should not be confused with PubMed identifiers ([`PMID`](@ref)s),
+which are specifically used by PubMed but are distinct from PMCIDs.
+
+# Examples
+
+```julia
+julia> PMCID("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC012345678")
+PMCID:12345678
+
+julia> println(PMCID(12345678))
+PMC12345678
+
+julia> PMCID(123456789)
+ERROR: Malformed identifier: PMCID identifier 123456789 must be no more than 8 digits
+```
+"""
+struct PMCID <: AcademicIdentifier
+    id::UInt
+    function PMCID(id::Union{Int, UInt})
+        id >= 0 || throw(MalformedIdentifier{PMCID}(id, "must be a non-negative value"))
+        id <= 10^8 || throw(MalformedIdentifier{PMCID}(id, "must be no more than 8 digits"))
+        new(UInt(id))
+    end
+end
+
+baseid(pmcid::PMCID) = pmcid.id
+
+function PMCID(id::AbstractString)
+    lid = lowercase(id)
+    for prefix in ("pmc", "pmcid:", "https://www.ncbi.nlm.nih.gov/pmc/articles/")
+        if startswith(lid, prefix)
+            return PMCID(@view id[ncodeunits(prefix)+1:end])
+        end
+    end
+    PMCID(parse(UInt, id))
+end
+
+function Base.print(io::IO, pmcid::PMCID)
+    print(io, "PMC")
+    print(io, lpad(pmcid.id, 8, '0'))
+end
+
+function Base.show(io::IO, pmcid::PMCID)
+    show(io, PMCID)
+    print(io, '(', pmcid.id, ')')
+end
+
+function Base.show(io::IO, ::MIME"text/plain", pmcid::PMCID)
+    print(io, S"{bold:PMCID:}{link={https://www.ncbi.nlm.nih.gov/pmc/articles/$(pmcid.id)}:$(pmcid.id)}")
+end
+
+
+# ISSN
+
+"""
+    ISSN <: AcademicIdentifier
+
+An International Standard Serial Number (ISSN) is a unique identifier for serial
+publications.  It consists of a 7-digit integer with a checksum digit. Invalid
+ISSNs will throw a `MalformedIdentifier` exception, and identifiers with an
+incorrect checksum will throw a `ChecksumViolation` exception.
+
+# Examples
+
+```julia
+julia> ISSN("1095-5054")
+ISSN:1095-5054
+
+julia> ISSN("1095-5053")
+ERROR: Checksum violation: the correct checksum for ISSN identifier 1095505 is 4 but got 3
+```
+"""
+struct ISSN <: AcademicIdentifier
+    code::UInt32
+    function ISSN(id::Union{UInt32, Int32, UInt64, Int64}, checksum::Integer)
+        ndigits(id) <= 7 || throw(MalformedIdentifier{ISSN}(id, "must be a 7-digit integer"))
+        digsum = 0
+        for (i, dig) in enumerate(digits(id, pad=7))
+            digsum += (i + 1) * dig
+        end
+        checkcalc = (11 - digsum % 11) % 11
+        if checkcalc != checksum
+            throw(ChecksumViolation{ISSN}(id, checksum, checkcalc))
+        end
+        code = UInt32(id) + UInt32(checksum) << 24
+        new(code)
+    end
+end
+
+baseid(issn::ISSN) = Int(issn.code & 0x00ffffff)
+checksum(issn::ISSN) = Int8((issn.code & 0xff000000) >> 24)
+
+function ISSN(code::AbstractString)
+    lcode = lowercase(code)
+    for prefix in ("issn:", "issn", "https://portal.issn.org/resource/ISSN/")
+        if startswith(lcode, prefix)
+            return ISSN(@view code[ncodeunits(prefix)+1:end])
+        end
+    end
+    issndigits = replace(code, '-' => "")
+    if length(issndigits) > 8
+        throw(MalformedIdentifier{ISSN}(code, "must be an 8-digit integer"))
+    end
+    iddigits..., checksum = issndigits
+    id = parse(Int32, iddigits)
+    check = if uppercase(checksum) == 'X' 10 else parse(Int, checksum) end
+    ISSN(id, check)
+end
+
+function Base.print(io::IO, issn::ISSN)
+    join(io, Iterators.partition(lpad(baseid(issn), 7, '0'), 4), '-')
+    csum = checksum(issn)
+    print(io, if csum == 10 'X' else Int8(csum) end)
+end
+
+function Base.show(io::IO, issn::ISSN)
+    show(io, ISSN)
+    print(io, "(\"")
+    print(io, issn)
+    print(io, "\")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", issn::ISSN)
+    codestr..., check = sprint(print, issn)
+    url = "https://portal.issn.org/resource/ISSN/$codestr$check"
+    print(io, S"{bold:ISSN:}{link=$url:$codestr{light,bright_magenta:$check}}")
+end
+
+
+# EAN13
+
+struct EAN13 <: AcademicIdentifier
+    code::UInt64
+    function EAN13(code::Integer, checksum::Integer)
+        ndigits(code) <= 12 || throw(MalformedIdentifier{EAN13}(code, "must be a 12-digit integer"))
+        digsum = 0
+        for (i, dig) in enumerate(digits(code, pad=12))
+            digsum += if i % 2 == 0 dig else dig * 3 end
+        end
+        checkcalc = (10 - digsum % 10) % 10
+        if checkcalc != checksum
+            throw(ChecksumViolation{EAN13}(code, checksum, checkcalc))
+        end
+        new(code * 10 + checksum)
+    end
+    function EAN13(code::Integer, checksum::Integer, flag::UInt16)
+        ean = EAN13(code, checksum)
+        new(ean.code | UInt64(flag) << 48)
+    end
+end
+
+baseid(ean::EAN13) = Int((0x00001fffffffffff & ean.code) ÷ 10)
+checksum(ean::EAN13) = Int8(ean.code % 10)
+
+function EAN13(code::Integer)
+    baseid, checksum = divrem(code, 10)
+    EAN13(baseid, checksum)
+end
+
+function EAN13(code::AbstractString)
+    digits = replace(code, '-' => "")
+    if length(digits) > 13
+        throw(MalformedIdentifier{EAN13}(code, "must be a 13-digit integer"))
+    end
+    EAN13(parse(Int64, digits))
+end
+
+function Base.print(io::IO, ean::EAN13)
+    print(io, lpad(baseid(ean), 13, '0'))
+end
+
+function Base.show(io::IO, ean::EAN13)
+    show(io, EAN13)
+    print(io, "(\"")
+    print(io, baseid(ean), checksum(ean))
+    print(io, "\")")
+end
+
+const IAN = EAN13
+
+struct EAN8 <: AcademicIdentifier
+    code::UInt
+end
+
+struct ISBN <: AcademicIdentifier
+    code::EAN13
+end
+
+Base.convert(::Type{EAN13}, isbn::ISBN) = isbn.code
+
+
+# ISBN
+
+"""
+    ISBN <: AcademicIdentifier
+
+An International Standard Book Number (ISBN) is a unique identifier for books and book-like
+publications. It consists of a 10-digit integer with a checksum digit. ISBNs can also be 13-digit
+EAN-13 codes starting with 978.
+
+Invalid ISBNs will throw a `MalformedIdentifier` exception, and identifiers with an incorrect
+checksum will throw a `ChecksumViolation` exception.
+
+# Examples
+
+```julia
+julia> ISBN("0141439564")
+ISBN("0-14-143956-4")
+```
+"""
+function ISBN(code::Integer)
+    ndigits(code) == 13 || throw(MalformedIdentifier{ISBN}(code, "must be a 13-digit integer"))
+    code ÷ 10^10 == 978 || throw(MalformedIdentifier{ISBN}(code, "must start with 978"))
+    ISBN(EAN13(code))
+end
+
+baseid(isbn::ISBN) = baseid(isbn.code)
+checksum(isbn::ISBN) = checksum(isbn.code)
+
+function Base.convert(::Type{ISBN}, ean::EAN13)
+    if baseid(ean) ÷ 10^10 != 978
+        throw(MalformedIdentifier{ISBN}(baseid(ean), "must start with 978"))
+    end
+    ISBN(ean)
+end
+
+function ISBN(code::AbstractString)
+    if startswith(lowercase(code), "isbn:")
+        return ISBN(@view code[ncodeunits("isbn:")+1:end])
+    end
+    digits = replace(code, '-' => "")
+    if length(digits) == 13
+        ISBN(parse(Int64, digits))
+    elseif length(digits) == 10
+        # FIXME: handle the check digit specially, etc.
+        ISBN(parse(Int64, digits))
+    else
+        throw(MalformedIdentifier{ISBN}(code, "must be a 10 or 13-digit integer"))
+    end
+end
+
+function Base.print(io::IO, isbn::ISBN)
+    show(io, lpad(isbn.code % 10^10, 10, '0'))
+end
+
+function Base.show(io::IO, isbn::ISBN)
+    code = isbn.code % 10^10
+    show(io, ISBN)
+    print(io, '(')
+    show(io, lpad(code, 10, '0'))
+    print(io, ')')
+
+
+# Wikidata
+
+"""
+    Wikidata <: AcademicIdentifier
+
+A Wikidata identifier is a unique identifier for entities in the Wikidata knowledge base. It consists
+of a 'Q' followed by an integer. Invalid Wikidata identifiers will throw a `MalformedIdentifier`
+exception.
+
+# Examples
+
+```julia
+julia> Wikidata("Q42")
+Wikidata:Q42
+
+julia> print(Wikidata("Q42"))
+Q42
+"""
+struct Wikidata <: AcademicIdentifier
+    id::UInt64
+end
+
+function Wikidata(id::AbstractString)
+    if startswith(id, 'Q')
+        Wikidata(parse(UInt64, id[2:end]))
+    else
+        throw(MalformedIdentifier{Wikidata}(id, "must start with 'Q'"))
+    end
+end
+
+function Base.print(io::IO, wd::Wikidata)
+    print(io, 'Q', wd.id)
+end
+
+function Base.show(io::IO, wd::Wikidata)
+    show(io, Wikidata)
+    print(io, "(\"Q", wd.id, "\")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", wd::Wikidata)
+    print(io, S"{bold:Wikidata:}{link=https://www.wikidata.org/wiki/Q$(wd.id):Q$(wd.id)}")
+end
+
+end
