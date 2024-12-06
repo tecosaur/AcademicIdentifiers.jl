@@ -4,6 +4,8 @@ using StyledStrings: @styled_str as @S_str
 
 export AcademicIdentifier, DOI, ORCID, ROR, PMID, PMCID, ISSN, ISBN, Wikidata
 
+include("isbn-hyphenation.jl")
+
 abstract type AcademicIdentifier end
 
 struct MalformedIdentifier{T <: AcademicIdentifier, I} <: Exception
@@ -560,27 +562,89 @@ function ISBN(code::AbstractString)
     if startswith(lowercase(code), "isbn:")
         return ISBN(@view code[ncodeunits("isbn:")+1:end])
     end
-    digits = replace(code, '-' => "")
-    if length(digits) == 13
-        ISBN(parse(Int64, digits))
-    elseif length(digits) == 10
-        # FIXME: handle the check digit specially, etc.
-        ISBN(parse(Int64, digits))
+    plaincode = replace(code, '-' => "", ' ' => "")
+    if length(plaincode) == 13
+        ISBN(parse(Int64, plaincode))
+    elseif length(plaincode) == 10
+        cdigits..., check = plaincode
+        dcode = parse(Int, cdigits)
+        csum = 0
+        for (i, digit) in enumerate(digits(dcode * 10, pad=10))
+            csum += i * digit
+        end
+        cdigit = 11 - mod1(csum, 11)
+        checknum = if check == 'X' 10 else parse(Int, check) end
+        if cdigit != checknum
+            throw(ChecksumViolation{ISBN}(code, checknum, cdigit))
+        end
+        eansum = 0
+        for (i, dig) in enumerate(digits(dcode, pad=12))
+            eansum += if i % 2 == 0 dig else dig * 3 end
+        end
+        eancheck = (10 - eansum % 10) % 10
+        ISBN(EAN13(dcode, eancheck, 0x1000 | UInt8(cdigit)))
     else
         throw(MalformedIdentifier{ISBN}(code, "must be a 10 or 13-digit integer"))
     end
 end
 
 function Base.print(io::IO, isbn::ISBN)
-    show(io, lpad(isbn.code % 10^10, 10, '0'))
+    flag = UInt16((isbn.code.code & UInt64(0xffff) << 48) >> 48)
+    code3, code10 = if iszero(flag)
+        divrem(isbn.code.code, 10^10)
+    else
+        978, baseid(isbn) * 10 + checksum(isbn)
+    end
+    unhyphenated, last3 = divrem(code10, 1000)
+    codegroup, groupstr = 0, ""
+    for (prefix3, class) in ISBN_GROUP_HYPHENATION
+        prefix3 == code3 || continue
+        for (len, range) in class
+            first(range) <= unhyphenated <= last(range) || continue
+            if len > 0
+                codegroup, unhyphenated = divrem(unhyphenated, 10^(7 - len))
+                groupstr = lpad(codegroup, len, '0')
+            end
+            break
+        end
+        break
+    end
+    pubstr = ""
+    for (prefix3, classes) in ISBN_PUB_HYPHENATION
+        prefix3 == code3 || continue
+        for (prefixgroup, class) in classes
+            prefixgroup == codegroup || continue
+            for (len, range) in class
+                first(range) <= unhyphenated <= last(range) || continue
+                if len > 0
+                    codepub, unhyphenated = divrem(unhyphenated, 10^(7 - ncodeunits(groupstr) - len))
+                    pubstr = lpad(codepub, len, '0')
+                end
+                break
+            end
+        end
+        break
+    end
+    unhyphenated = 1000 * unhyphenated + last3
+    unhyphenated, checkdigit = divrem(unhyphenated, 10)
+    iszero(flag) && print(io, code3, '-')
+    !isempty(groupstr) && print(io, groupstr, '-')
+    !isempty(pubstr) && print(io, pubstr, '-')
+    print(io, unhyphenated, '-')
+    if !iszero(flag)
+        cdigit = Int8(flag & 0x00ff)
+        print(io, if cdigit == 10 'X' else cdigit end)
+    else
+        print(io, checkdigit)
+    end
 end
 
 function Base.show(io::IO, isbn::ISBN)
-    code = isbn.code % 10^10
     show(io, ISBN)
-    print(io, '(')
-    show(io, lpad(code, 10, '0'))
-    print(io, ')')
+    print(io, "(\"")
+    print(io, isbn)
+    print(io, "\")")
+end
 
 
 # Wikidata
