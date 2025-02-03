@@ -1,0 +1,41 @@
+#+title: AcademicIdentifiers.jl
+#+author: tecosaur
+
+Structured and validated types for common identifiers used in/around academic
+work.
+
+* Generic framework
+
+An abstract ~AcademicIdentifier~ type is introduced, along with the error types
+~MalformedIdentifier~ and ~ChecksumViolation~ exceptions.
+
+* API
+
+An ~AcademicIdentifier~ can be constructed from its canonical string
+representation (or variations thereof), and can be returned to a canonical
+representation by ~print~ or ~string~. It is usual for an identifier to be displayed
+in the format =name:code= in the REPL, with a hyperlink to the canonical page for
+the resource if possible.
+
+The underlying integer identifier can be extracted using the ~baseid~ accessor
+function, and similarly the checksum (when applicable) using the ~checksum~
+accessor function.
+
+#+begin_src julia
+(::Type{<:AcademicIdentifier})(representation::String) -> T
+baseid(id::AcademicIdentifier) -> Union{Integer, Nothing}
+checksum(id::AcademicIdentifier) -> Union{Integer, Nothing}
+print(id::AcademicIdentifier) -> Nothing (print canonical string form)
+string(id::AcademicIdentifier) -> String (canonical form)
+#+end_src
+
+* Implemented identifiers
+
++ ~DOI~
++ ~ORCID~
++ ~ROR~
++ ~PMID~
++ ~PMCID~
++ ~ISSN~
++ ~ISBN~
++ ~Wikidata~
