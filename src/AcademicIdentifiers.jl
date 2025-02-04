@@ -2,7 +2,7 @@ module AcademicIdentifiers
 
 using StyledStrings: @styled_str as @S_str
 
-export AcademicIdentifier, DOI, ORCID, ROR, PMID, PMCID, ISSN, ISBN, Wikidata
+export AcademicIdentifier, ArXiv, DOI, ORCID, ROR, PMID, PMCID, ISSN, ISBN, Wikidata
 export shortcode, purl
 
 include("isbn-hyphenation.jl")
@@ -191,6 +191,71 @@ function Base.show(io::IO, ::MIME"text/plain", id::AcademicIdentifier)
         print(io, S"{bold:$label:}{link=$url:$idstr}")
     end
 end
+
+
+# arXiv
+
+"""
+    ArXiv <: AcademicIdentifier
+
+An ArXiv identifier is a unique identifier for preprints in the arXiv repository. It consists of a
+`YYMM.NNNNN` format, where `YY` is the year, `MM` is the month, and `NNNNN` is the number of the preprint.
+Preprints prior to 2015 have a 4-digit number, while those from 2015 onwards have a 5-digit number.
+
+A version number can be appended to the identifier, separated by a 'v'.
+
+# Examples
+
+```julia
+julia> ArXiv("2001.12345")
+ArXiv:2001.12345
+
+julia> ArXiv("https://arxiv.org/abs/2001.12345")
+ArXiv:2001.12345
+
+julia> print(ArXiv("arXiv:2001.12345"))
+https://arxiv.org/abs/2001.12345
+"""
+struct ArXiv <: AcademicIdentifier
+    version::UInt8
+    year::UInt8
+    month::UInt8
+    number::UInt32
+end
+
+function ArXiv(id::AbstractString)
+    if startswith(id, "https://arxiv.org/")
+        prefixend = findnext('/', id, ncodeunits("https://arxiv.org/")+1)
+        return ArXiv(@view id[something(prefixend, ncodeunits("https://arxiv.org/")+1):end])
+    elseif startswith(lowercase(id), "arxiv:")
+        return ArXiv(@view id[ncodeunits("arxiv:")+1:end])
+    end
+    code, verstr = if 'v' in id
+        split(id, 'v', limit=2)
+    else
+        id, "0"
+    end
+    version = tryparse(UInt8, verstr)
+    isnothing(version) && throw(MalformedIdentifier{ArXiv}(id, "version must be an integer"))
+    '.' in code || throw(MalformedIdentifier{ArXiv}(id, "must contain a period separating the date and number component (YYMM.NNNNN)"))
+    datestr, numstr = split(code, '.', limit=2)
+    length(datestr) == 4 || throw(MalformedIdentifier{ArXiv}(id, "date component must be 4 digits (YYMM.nnnnn)"))
+    year = tryparse(UInt8, @view datestr[1:2])
+    isnothing(year) && throw(MalformedIdentifier{ArXiv}(id, "year component (YYmm.nnnnn) must be an integer"))
+    month = tryparse(UInt8, @view datestr[3:4])
+    isnothing(month) && throw(MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be an integer"))
+    1 <= month <= 12 || throw(MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be between 01 and 12"))
+    number = tryparse(UInt32, numstr)
+    isnothing(number) && throw(MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must be an integer"))
+    ArXiv(version, year, month, number)
+end
+
+shortcode(arxiv::ArXiv) =
+    string(lpad(arxiv.year, 2, '0'), lpad(arxiv.month, 2, '0'),
+           '.', lpad(arxiv.number, ifelse(arxiv.year >= 15, 5, 4), '0'),
+           if arxiv.version > 0 'v' * arxiv.version else "" end)
+
+purlprefix(::Type{ArXiv}) = "https://arxiv.org/abs/"
 
 
 # DOI
