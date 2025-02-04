@@ -5,7 +5,7 @@ module AcademicIdentifiers
 
 using StyledStrings: @styled_str as @S_str
 
-export AcademicIdentifier, ArXiv, DOI, ORCID, ROR, PMID, PMCID, ISSN, ISBN, Wikidata
+export AcademicIdentifier, ArXiv, ArXivOld, DOI, ORCID, ROR, PMID, PMCID, ISSN, ISBN, Wikidata
 export shortcode, purl
 
 include("isbn-hyphenation.jl")
@@ -259,6 +259,48 @@ shortcode(arxiv::ArXiv) =
            if arxiv.version > 0 'v' * arxiv.version else "" end)
 
 purlprefix(::Type{ArXiv}) = "https://arxiv.org/abs/"
+
+
+# ArXivOld (1991 to March 2007)
+
+struct ArXivOld <: AcademicIdentifier
+    archive::String
+    class::String
+    year::UInt8
+    month::UInt8
+    number::UInt16
+end
+
+function ArXivOld(id::AbstractString)
+    if startswith(id, "https://arxiv.org/")
+        prefixend = findnext('/', id, ncodeunits("https://arxiv.org/")+1)
+        return ArXivOld(@view id[something(prefixend, ncodeunits("https://arxiv.org/")+1):end])
+    elseif startswith(lowercase(id), "arxiv:")
+        return ArXivOld(@view id[ncodeunits("arxiv:")+1:end])
+    end
+    '/' in id || throw(MalformedIdentifier{ArXivOld}(id, "must contain a slash separating the components (archive.class/YYMMNNN)"))
+    archclass, numstr = split(id, '/', limit=2)
+    '.' in archclass || throw(MalformedIdentifier{ArXivOld}(id, "archive.class component must contain a period"))
+    archive, class = split(archclass, '.', limit=2)
+    length(class) == 2 || throw(MalformedIdentifier{ArXivOld}(id, "class component must be 2 characters"))
+    length(numstr) == 7 || throw(MalformedIdentifier{ArXivOld}(id, "number component must be 7 characters (YYMMNNN)"))
+    year = tryparse(UInt8, @view numstr[1:2])
+    isnothing(year) && throw(MalformedIdentifier{ArXivOld}(id, "year component (YYmmnnn) must be an integer"))
+    (year >= 91 || year <= 7) || throw(MalformedIdentifier{ArXivOld}(id, "year component (YYmmnnn) must be between 91 and 07"))
+    month = tryparse(UInt8, @view numstr[3:4])
+    isnothing(month) && throw(MalformedIdentifier{ArXivOld}(id, "month component (yyMMnnn) must be an integer"))
+    1 <= month <= 12 || throw(MalformedIdentifier{ArXivOld}(id, "month component (yyMMnnn) must be between 01 and 12"))
+    num = tryparse(UInt16, @view numstr[5:7])
+    isnothing(num) && throw(MalformedIdentifier{ArXivOld}(id, "number component (yymmNNN) must be an integer"))
+    ArXivOld(archive, class, year, month, num)
+end
+
+shortcode(arxiv::ArXivOld) =
+    string(arxiv.archive, '.', arxiv.class, '/', lpad(arxiv.year, 2, '0'),
+           lpad(arxiv.month, 2, '0'), lpad(arxiv.number, 3, '0'))
+
+purl(arxiv::ArXivOld) = "https://arxiv.org/abs/$(arxiv.archive)/" * lpads(arxiv.year, 2, '0') *
+                        lpads(arxiv.month, 2, '0') * lpads(arxiv.number, 3, '0')
 
 
 # DOI

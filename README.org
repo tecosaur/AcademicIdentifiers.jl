@@ -34,7 +34,7 @@ string(id::AcademicIdentifier) -> String (canonical form)
 
 * Implemented identifiers
 
-+ ~ArXiv~
++ ~ArXiv~, ~ArXivOld~
 + ~DOI~
 + ~ORCID~
 + ~ROR~
