@@ -6,8 +6,9 @@ work.
 
 * Generic framework
 
-An abstract ~AcademicIdentifier~ type is introduced, along with the error types
-~MalformedIdentifier~ and ~ChecksumViolation~ exceptions.
+An abstract ~AcademicIdentifier~ type is introduced (see the docstring for more
+information), along with the error types ~MalformedIdentifier~ and
+~ChecksumViolation~.
 
 * API
 

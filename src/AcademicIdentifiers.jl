@@ -7,8 +7,82 @@ export shortcode, purl
 
 include("isbn-hyphenation.jl")
 
+"""
+    AcademicIdentifier
+
+An abstract type representing an academic identifier.
+
+Academic identifiers are unique identifiers referring to resources used in
+academic and scholarly contexts. They can refer to a wide variety of resources,
+including publications, researchers, and organisations. This type is used to
+represent a common interface for working with these identifiers.
+
+It is expected that all identifiers have a plain text canonical form, and
+optionally a PURL (Persistent Uniform Resource Locator) that can be used to link
+to the resource. These may be one and the same.
+
+# API
+
+## Mandatory components
+
+Your academic identifier, named `AId` for example, must be able to be constructed
+from its canonical form as well as the plain form (these may be the same).
+
+```julia
+AId("canonical string form") -> AId
+AId("minimal plain form") -> AId
+shortcode(::AId) -> String
+```
+
+Invariants:
+- `AId(shortcode(x::AId)) == x`
+- `x::AId == y::AId` *iff* `shortcode(x) == shortcode(y)`
+
+If the constructor is passed a string that doesn't match the expected format, is
+is reasonable to throw a [`MalformedIdentifier`](@ref) error.
+
+When there is a checksum component to the identifier, it is usual for an inner
+constructor to be defined that verifies the checksum matches or throw a
+[`ChecksumViolation`](@ref) error. This makes invalid identifiers
+unconstructable.
+
+## Standard components
+
+Most identifiers can be represented in a numerical form, possibly with a
+checksum value. Should that be the case, it is recommended that you define the
+`idcode` and `idchecksum` accessors.
+
+```
+idcode(::AId) -> Integer
+idchecksum(::AId) -> Integer
+```
+
+Invariants:
+- `idcode(x::AId) == idcode(y::AId) && idchecksum(x) == idchecksum(y)` *iff* `x == y`
+
+## Optional components
+
+When a standard persistent URL exists for the resource, you should define either
+`purlprefix` when the URL is of the form `\$prefix\$(shortcode(x::AId))` or
+`purl(x::AId)` when the URL scheme is more complicated.
+
+```
+purlprefix(::Type{AId}) -> String
+purl(::Type{AId}) -> String
+```
+
+Invariants:
+- `AId(purl(x::AId)) == x`
+- `purl(x::AId) == purl(y::AId)` *iff* `x == y`
+"""
 abstract type AcademicIdentifier end
 
+"""
+    MalformedIdentifier{T<:AcademicIdentifier}(input, problem::String) -> MalformedIdentifier{T}
+
+The provided `input` is not a recognised form of a `T` identifier,
+due to the specified `problem`.
+"""
 struct MalformedIdentifier{T <: AcademicIdentifier, I} <: Exception
     input::I
     problem::String
@@ -17,6 +91,12 @@ end
 MalformedIdentifier{T}(input::I, problem::String) where {T, I} =
     MalformedIdentifier{T, I}(input, problem)
 
+"""
+    ChecksumViolation{T<:AcademicIdentifier}(id, checksum, expected) -> ChecksumViolation{T}
+
+The checksum `checksum` for the `T` identifier `id` is incorrect; the correct
+checksum is `expected`.
+"""
 struct ChecksumViolation{T <: AcademicIdentifier, I} <: Exception
     id::I
     checksum::Integer
@@ -49,12 +129,40 @@ If applicable, return the check digit of an `AcademicIdentifier`.
 """
 function idchecksum(::AcademicIdentifier) end
 
+"""
+    shortcode(id::AcademicIdentifier) -> String
+
+Return a plain string representation of an `AcademicIdentifier`.
+
+This should be the minimal complete representation of the identifier,
+with no additional formatting.
+
+The canonical form for the identifier should contain the plain identifier,
+but may include additional information such as a standard prefix and/or suffix.
+"""
 function shortcode end
 
+"""
+    purlprefix(::Type{<:AcademicIdentifier}) -> Union{String, Nothing}
+
+Return the standard prefix of a PURL for an `AcademicIdentifier`, if applicable.
+
+If defined, this implies that a PURL can be constructed by appending the `shortcode`
+representation of the identifier to this prefix. As such, you should take care to
+include any necessary trailing slashes or other separators in this prefix.
+"""
 function purlprefix(::Type{T}) where {T <: AcademicIdentifier} end
 
 purlprefix(::T) where {T <: AcademicIdentifier} = purlprefix(T)
 
+"""
+    purl(id::AcademicIdentifier) -> Union{String, Nothing}
+
+If applicable, return the PURL of an `AcademicIdentifier`.
+
+PURLs are Persistent Uniform Resource Locators that provide a permanent link to
+a resource.
+"""
 function purl(id::AcademicIdentifier)
     prefix = purlprefix(id)
     if !isnothing(prefix)
