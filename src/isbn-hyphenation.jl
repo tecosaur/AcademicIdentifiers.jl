@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: © 2025 TEC <git@tecosaur.net>
+# SPDX-License-Identifier: MPL-2.0
+
 # Quine (ish) for automatically setting hyphenation data
 # (ish): Technically this is a cheating quine, as it relies on receiving input.
 

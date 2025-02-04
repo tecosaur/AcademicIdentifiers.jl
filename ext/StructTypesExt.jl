@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: © 2025 TEC <git@tecosaur.net>
+# SPDX-License-Identifier: MPL-2.0
+
 module StructTypesExt
 
 using AcademicIdentifiers
