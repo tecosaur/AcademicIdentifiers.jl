@@ -3,6 +3,7 @@ module AcademicIdentifiers
 using StyledStrings: @styled_str as @S_str
 
 export AcademicIdentifier, DOI, ORCID, ROR, PMID, PMCID, ISSN, ISBN, Wikidata
+export shortcode, purl
 
 include("isbn-hyphenation.jl")
 
@@ -35,18 +36,53 @@ function Base.showerror(io::IO, @nospecialize(ex::ChecksumViolation{T})) where {
 end
 
 """
-    baseid(id::AcademicIdentifier) -> Union{Integer, Nothing}
+    idcode(id::AcademicIdentifier) -> Union{Integer, Nothing}
 
-If applicable, return the base identifier of an `AcademicIdentifier` object.
+If applicable, return the base identifier of an `AcademicIdentifier`.
 """
-function baseid(::AcademicIdentifier) end
+function idcode(::AcademicIdentifier) end
 
 """
-    checksum(id::AcademicIdentifier) -> Union{Integer, Nothing}
+    idchecksum(id::AcademicIdentifier) -> Union{Integer, Nothing}
 
-If applicable, return the check digit of an `AcademicIdentifier` object.
+If applicable, return the check digit of an `AcademicIdentifier`.
 """
-function checksum(::AcademicIdentifier) end
+function idchecksum(::AcademicIdentifier) end
+
+function shortcode end
+
+function purlprefix(::Type{T}) where {T <: AcademicIdentifier} end
+
+purlprefix(::T) where {T <: AcademicIdentifier} = purlprefix(T)
+
+function purl(id::AcademicIdentifier)
+    prefix = purlprefix(id)
+    if !isnothing(prefix)
+        prefix * shortcode(id)
+    end
+end
+
+function Base.print(io::IO, id::AcademicIdentifier)
+    print(io, something(purl(id), shortcode(id)))
+end
+
+function Base.show(io::IO, id::AcademicIdentifier)
+    show(io, typeof(id))
+    print(io, '(')
+    show(io, shortcode(id))
+    print(io, ')')
+end
+
+function Base.show(io::IO, ::MIME"text/plain", id::AcademicIdentifier)
+    label = nameof(typeof(id))
+    url = purl(id)
+    idstr = shortcode(id)
+    if isnothing(url)
+        print(io, S"{bold:$label:}$idstr")
+    else
+        print(io, S"{bold:$label:}{link=$url:$idstr}")
+    end
+end
 
 
 # DOI
@@ -90,13 +126,11 @@ function DOI(doi::AbstractString)
     end
 end
 
-function Base.print(io::IO, doi::DOI)
-    print(io, doi.registrant, '/', doi.object)
-end
+purlprefix(::Type{DOI}) = "https://doi.org/"
+shortcode(doi::DOI) = doi.registrant * '/' * doi.object
 
-function Base.show(io::IO, ::MIME"text/plain", doi::DOI)
-    url = "https://doi.org/$(doi.registrant)/$(doi.object)"
-    print(io, S"{bold:doi:}{link=$url:$(doi.registrant)/$(doi.object)}")
+function Base.print(io::IO, doi::DOI)
+    print(io, "doi:", shortcode(doi))
 end
 
 
@@ -141,9 +175,6 @@ struct ORCID <: AcademicIdentifier
     end
 end
 
-baseid(orcid::ORCID) = Int(orcid.id & 0x003fffffffffffff)
-checksum(orcid::ORCID) = Int8((orcid.id & 0xff00000000000000) >> 60)
-
 function ORCID(id::AbstractString)
     lid = lowercase(id)
     for prefix in ("orcid:", "orcid.org/", "https://orcid.org/")
@@ -161,26 +192,16 @@ function ORCID(id::AbstractString)
     ORCID(id, check)
 end
 
-function Base.print(io::IO, orcid::ORCID)
-    idstr, check = string(baseid(orcid)), checksum(orcid)
-    print(io, "https://orcid.org/")
-    join(io, Iterators.partition(lpad(idstr, 15, '0'), 4), '-')
-    print(io, if check == 10 'X' else check end)
+idcode(orcid::ORCID) = Int(orcid.id & 0x003fffffffffffff)
+idchecksum(orcid::ORCID) = Int8((orcid.id & 0xff00000000000000) >> 60)
+
+function shortcode(orcid::ORCID)
+    idstr, check = string(idcode(orcid)), idchecksum(orcid)
+    join(Iterators.partition(lpad(idstr, 15, '0'), 4), '-') *
+    if check == 10 "X" else string(check) end
 end
 
-function Base.show(io::IO, orcid::ORCID)
-    show(io, ORCID)
-    print(io, "(\"")
-    print(io, orcid)
-    print(io, "\")")
-end
-
-function Base.show(io::IO, ::MIME"text/plain", orcid::ORCID)
-    idstr, check = string(baseid(orcid)), checksum(orcid)
-    dashid = join(Iterators.partition(lpad(idstr, 15, '0'), 4), '-')
-    checkchar = if check == 10 'X' else check end
-    print(io, S"{bold:ORCID:}{link={https://orcid.org/$idstr}:$dashid{light,bright_magenta:$checkchar}}")
-end
+purlprefix(::Type{ORCID}) = "https://orcid.org/"
 
 
 # ROR
@@ -234,9 +255,6 @@ struct ROR <: AcademicIdentifier
     end
 end
 
-baseid(ror::ROR) = ror.num
-checksum(ror::ROR) = 98 - ((ror.num * 100) % 97)
-
 function ROR(num::AbstractString)
     for prefix in ("ror:", "ror.org/", "https://ror.org/")
         if startswith(lowercase(num), prefix)
@@ -253,23 +271,10 @@ function ROR(num::AbstractString)
     ROR(croc32decode(Int, view(rest, 1:6)), parse(Int, view(rest, 7:8)))
 end
 
-function Base.print(io::IO, ror::ROR)
-    print(io, "https://ror.org/")
-    print(io, croc32encode(ror.num))
-    print(io, lpad(checksum(ror), 2, '0'))
-end
-
-function Base.show(io::IO, ror::ROR)
-    show(io, ROR)
-    print(io, "(\"0")
-    print(io, croc32encode(ror.num), lpad(checksum(ror), 2, '0'))
-    print(io, "\")")
-end
-
-function Base.show(io::IO, ::MIME"text/plain", ror::ROR)
-    print(io, S"{bold:ROR:}{link={https://ror.org/$codestr}:0$(croc32encode(ror.num))\
-                {light,bright_magenta:$(lpad(checksum(ror), 2, '0'))}}")
-end
+idcode(ror::ROR) = ror.num
+idchecksum(ror::ROR) = 98 - ((ror.num * 100) % 97)
+shortcode(ror::ROR) = '0' * croc32encode(ror.num) * string(idchecksum(ror))
+purlprefix(::Type{ROR}) = "https://ror.org/"
 
 
 # PMID
@@ -306,8 +311,6 @@ struct PMID <: AcademicIdentifier
     end
 end
 
-baseid(pmid::PMID) = pmid.id
-
 function PMID(id::AbstractString)
     lid = lowercase(id)
     for prefix in ("pmid:", "pubmed.ncbi.nlm.nih.gov/", "https://pubmed.ncbi.nlm.nih.gov/")
@@ -318,9 +321,9 @@ function PMID(id::AbstractString)
     PMID(parse(UInt, id))
 end
 
-function Base.show(io::IO, ::MIME"text/plain", pmid::PMID)
-    print(io, S"{bold:PMID:}{link={https://pubmed.ncbi.nlm.nih.gov/$(pmid.id)}:$(pmid.id)}")
-end
+idcode(pmid::PMID) = pmid.id
+shortcode(pmid::PMID) = string(pmid.id)
+purlprefix(::Type{PMID}) = "https://pubmed.ncbi.nlm.nih.gov/"
 
 
 # PMCID
@@ -357,8 +360,6 @@ struct PMCID <: AcademicIdentifier
     end
 end
 
-baseid(pmcid::PMCID) = pmcid.id
-
 function PMCID(id::AbstractString)
     lid = lowercase(id)
     for prefix in ("pmc", "pmcid:", "https://www.ncbi.nlm.nih.gov/pmc/articles/")
@@ -369,19 +370,9 @@ function PMCID(id::AbstractString)
     PMCID(parse(UInt, id))
 end
 
-function Base.print(io::IO, pmcid::PMCID)
-    print(io, "PMC")
-    print(io, lpad(pmcid.id, 8, '0'))
-end
-
-function Base.show(io::IO, pmcid::PMCID)
-    show(io, PMCID)
-    print(io, '(', pmcid.id, ')')
-end
-
-function Base.show(io::IO, ::MIME"text/plain", pmcid::PMCID)
-    print(io, S"{bold:PMCID:}{link={https://www.ncbi.nlm.nih.gov/pmc/articles/$(pmcid.id)}:$(pmcid.id)}")
-end
+idcode(pmcid::PMCID) = pmcid.id
+shortcode(pmcid::PMCID) = lpad(string(pmcid.id), 8, '0')
+purlprefix(::Type{PMCID}) = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
 
 
 # ISSN
@@ -421,9 +412,6 @@ struct ISSN <: AcademicIdentifier
     end
 end
 
-baseid(issn::ISSN) = Int(issn.code & 0x00ffffff)
-checksum(issn::ISSN) = Int8((issn.code & 0xff000000) >> 24)
-
 function ISSN(code::AbstractString)
     lcode = lowercase(code)
     for prefix in ("issn:", "issn", "https://portal.issn.org/resource/ISSN/")
@@ -441,24 +429,14 @@ function ISSN(code::AbstractString)
     ISSN(id, check)
 end
 
-function Base.print(io::IO, issn::ISSN)
-    join(io, Iterators.partition(lpad(baseid(issn), 7, '0'), 4), '-')
-    csum = checksum(issn)
-    print(io, if csum == 10 'X' else Int8(csum) end)
+idcode(issn::ISSN) = Int(issn.code & 0x00ffffff)
+idchecksum(issn::ISSN) = Int8((issn.code & 0xff000000) >> 24)
+function shortcode(issn::ISSN)
+    code = join(Iterators.partition(lpad(string(idcode(issn)), 7, '0'), 4), '-')
+    csum = idchecksum(issn)
+    code * if csum == 10 "X" else string(csum) end
 end
-
-function Base.show(io::IO, issn::ISSN)
-    show(io, ISSN)
-    print(io, "(\"")
-    print(io, issn)
-    print(io, "\")")
-end
-
-function Base.show(io::IO, ::MIME"text/plain", issn::ISSN)
-    codestr..., check = sprint(print, issn)
-    url = "https://portal.issn.org/resource/ISSN/$codestr$check"
-    print(io, S"{bold:ISSN:}{link=$url:$codestr{light,bright_magenta:$check}}")
-end
+purlprefix(::Type{ISSN}) = "https://portal.issn.org/resource/ISSN/"
 
 
 # EAN13
@@ -483,12 +461,9 @@ struct EAN13 <: AcademicIdentifier
     end
 end
 
-baseid(ean::EAN13) = Int((0x00001fffffffffff & ean.code) ÷ 10)
-checksum(ean::EAN13) = Int8(ean.code % 10)
-
 function EAN13(code::Integer)
-    baseid, checksum = divrem(code, 10)
-    EAN13(baseid, checksum)
+    idcode, checksum = divrem(code, 10)
+    EAN13(idcode, checksum)
 end
 
 function EAN13(code::AbstractString)
@@ -499,16 +474,9 @@ function EAN13(code::AbstractString)
     EAN13(parse(Int64, digits))
 end
 
-function Base.print(io::IO, ean::EAN13)
-    print(io, lpad(baseid(ean), 13, '0'))
-end
-
-function Base.show(io::IO, ean::EAN13)
-    show(io, EAN13)
-    print(io, "(\"")
-    print(io, baseid(ean), checksum(ean))
-    print(io, "\")")
-end
+idcode(ean::EAN13) = Int((0x00001fffffffffff & ean.code) ÷ 10)
+idchecksum(ean::EAN13) = Int8(ean.code % 10)
+shortcode(ean::EAN13) = string(lpad(idcode(ean), 12, '0'), idchecksum(ean))
 
 const IAN = EAN13
 
@@ -548,16 +516,6 @@ function ISBN(code::Integer)
     ISBN(EAN13(code))
 end
 
-baseid(isbn::ISBN) = baseid(isbn.code)
-checksum(isbn::ISBN) = checksum(isbn.code)
-
-function Base.convert(::Type{ISBN}, ean::EAN13)
-    if baseid(ean) ÷ 10^10 != 978
-        throw(MalformedIdentifier{ISBN}(baseid(ean), "must start with 978"))
-    end
-    ISBN(ean)
-end
-
 function ISBN(code::AbstractString)
     if startswith(lowercase(code), "isbn:")
         return ISBN(@view code[ncodeunits("isbn:")+1:end])
@@ -588,12 +546,23 @@ function ISBN(code::AbstractString)
     end
 end
 
+idcode(isbn::ISBN) = idcode(isbn.code)
+idchecksum(isbn::ISBN) = idchecksum(isbn.code)
+shortcode(isbn::ISBN) = string(isbn)
+
+function Base.convert(::Type{ISBN}, ean::EAN13)
+    if idcode(ean) ÷ 10^10 != 978
+        throw(MalformedIdentifier{ISBN}(idcode(ean), "must start with 978"))
+    end
+    ISBN(ean)
+end
+
 function Base.print(io::IO, isbn::ISBN)
     flag = UInt16((isbn.code.code & UInt64(0xffff) << 48) >> 48)
     code3, code10 = if iszero(flag)
         divrem(isbn.code.code, 10^10)
     else
-        978, baseid(isbn) * 10 + checksum(isbn)
+        978, idcode(isbn) * 10 + idchecksum(isbn)
     end
     unhyphenated, last3 = divrem(code10, 1000)
     codegroup, groupstr = 0, ""
@@ -639,13 +608,6 @@ function Base.print(io::IO, isbn::ISBN)
     end
 end
 
-function Base.show(io::IO, isbn::ISBN)
-    show(io, ISBN)
-    print(io, "(\"")
-    print(io, isbn)
-    print(io, "\")")
-end
-
 
 # Wikidata
 
@@ -677,17 +639,7 @@ function Wikidata(id::AbstractString)
     end
 end
 
-function Base.print(io::IO, wd::Wikidata)
-    print(io, 'Q', wd.id)
-end
-
-function Base.show(io::IO, wd::Wikidata)
-    show(io, Wikidata)
-    print(io, "(\"Q", wd.id, "\")")
-end
-
-function Base.show(io::IO, ::MIME"text/plain", wd::Wikidata)
-    print(io, S"{bold:Wikidata:}{link=https://www.wikidata.org/wiki/Q$(wd.id):Q$(wd.id)}")
-end
+shortcode(wd::Wikidata) = string('Q', wd.id)
+purlprefix(::Type{Wikidata}) = "https://www.wikidata.org/wiki/"
 
 end
