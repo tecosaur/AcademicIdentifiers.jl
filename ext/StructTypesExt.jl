@@ -6,6 +6,12 @@ module StructTypesExt
 using AcademicIdentifiers
 using StructTypes
 
+StructTypes.StructType(::Type{ArXiv}) = StructTypes.StringType()
+StructTypes.construct(::Type{ArXiv}, arxiv::String; _kw...) = ArXiv(arxiv)
+
+StructTypes.StructType(::Type{ArXivOld}) = StructTypes.StringType()
+StructTypes.construct(::Type{ArXivOld}, arxiv::String; _kw...) = ArXivOld(arxiv)
+
 StructTypes.StructType(::Type{DOI}) = StructTypes.StringType()
 StructTypes.construct(::Type{DOI}, doi::String; _kw...) = DOI(doi)
 
