@@ -1,6 +1,6 @@
 name = "AcademicIdentifiers"
 uuid = "73aec6e9-1368-4429-b03d-50b89ba0733e"
-authors = ["TEC <git@tecosaur.net>"]
+authors = ["TEC <contact@tecosaur.net>"]
 version = "0.1.0"
 
 [deps]
