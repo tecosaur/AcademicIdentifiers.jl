@@ -5,7 +5,7 @@ module AcademicIdentifiers
 
 using StyledStrings: @styled_str as @S_str
 
-export AcademicIdentifier, ArXiv, ArXivOld, DOI, ORCID, ROR, PMID, PMCID, ISSN, ISBN, Wikidata
+export AcademicIdentifier, ArXiv, ArXivOld, DOI, EAN13, ISSN, ISBN, ORCID, ROR, PMID, PMCID, Wikidata
 export shortcode, purl
 
 include("isbn-hyphenation.jl")

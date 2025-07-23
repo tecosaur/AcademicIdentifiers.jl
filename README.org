@@ -36,10 +36,11 @@ string(id::AcademicIdentifier) -> String (canonical form)
 
 + ~ArXiv~, ~ArXivOld~
 + ~DOI~
++ ~EAN13~
++ ~ISSN~
++ ~ISBN~
 + ~ORCID~
 + ~ROR~
 + ~PMID~
 + ~PMCID~
-+ ~ISSN~
-+ ~ISBN~
 + ~Wikidata~
