@@ -738,6 +738,32 @@ purlprefix(::Type{ISSN}) = "https://portal.issn.org/resource/ISSN/"
 
 # EAN13
 
+"""
+    EAN13 <: AcademicIdentifier
+
+A European Article Number (EAN-13) is a 13-digit barcode standard which is a superset of the
+original 12-digit Universal Product Code (UPC) system. It consists of a 12-digit code with
+a checksum digit calculated using a weighted modulo-10 algorithm.
+
+Invalid EAN-13 identifiers will throw a `MalformedIdentifier` exception, and identifiers with an
+incorrect checksum will throw a `ChecksumViolation` exception.
+
+# Examples
+
+```julia
+julia> EAN13("9780596520687")
+EAN13:9780596520687
+
+julia> EAN13("978-0-596-52068-7")
+EAN13:9780596520687
+
+julia> println(EAN13("9780596520687"))
+9780596520687
+
+julia> EAN13("9780596520688")
+ERROR: Checksum violation: the correct checksum for EAN13 identifier 978059652068 is 7 but got 8
+```
+"""
 struct EAN13 <: AcademicIdentifier
     code::UInt64
     function EAN13(code::Integer, checksum::Integer)
