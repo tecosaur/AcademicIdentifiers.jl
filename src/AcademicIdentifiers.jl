@@ -242,7 +242,7 @@ function ArXiv(id::AbstractString)
     isnothing(version) && throw(MalformedIdentifier{ArXiv}(id, "version must be an integer"))
     '.' in code || throw(MalformedIdentifier{ArXiv}(id, "must contain a period separating the date and number component (YYMM.NNNNN)"))
     datestr, numstr = split(code, '.', limit=2)
-    length(datestr) == 4 || throw(MalformedIdentifier{ArXiv}(id, "date component must be 4 digits (YYMM.nnnnn)"))
+    all(isdigit, datestr) && ncodeunits(datestr) == 4 || throw(MalformedIdentifier{ArXiv}(id, "date component must be 4 digits (YYMM.nnnnn)"))
     year = tryparse(UInt8, @view datestr[1:2])
     isnothing(year) && throw(MalformedIdentifier{ArXiv}(id, "year component (YYmm.nnnnn) must be an integer"))
     month = tryparse(UInt8, @view datestr[3:4])
@@ -479,14 +479,11 @@ function ROR(num::AbstractString)
             return ROR(@view num[ncodeunits(prefix)+1:end])
         end
     end
-    if length(num) != 9
-        throw(MalformedIdentifier{ROR}(num, "must be 9 characters long"))
-    end
+    length(num) == 9 || throw(MalformedIdentifier{ROR}(num, "must be 9 characters long"))
     char0, rest... = num
-    if char0 != '0'
-        throw(MalformedIdentifier{ROR}(num, "must start with '0'"))
-    end
-    ROR(croc32decode(Int, view(rest, 1:6)), parse(Int, view(rest, 7:8)))
+    char0 == '0' || throw(MalformedIdentifier{ROR}(num, "must start with '0'"))
+    all(c -> c ∈ 'a':'z' || c ∈ 'A':'Z' || c ∈ '0':'9', rest) || throw(MalformedIdentifier{ROR}(num, "must only contain alphanumeric characters"))
+    ROR(croc32decode(Int, view(rest, 1:6)), parse(UInt, view(rest, 7:8)))
 end
 
 idcode(ror::ROR) = ror.num
