@@ -564,7 +564,7 @@ end
 
 idcode(ror::ROR) = ror.num
 idchecksum(ror::ROR) = 98 - ((ror.num * 100) % 97)
-shortcode(ror::ROR) = '0' * croc32encode(ror.num) * string(idchecksum(ror))
+shortcode(ror::ROR) = '0' * lpad(croc32encode(ror.num), 6, '0') * lpad(string(idchecksum(ror)), 2, '0')
 purlprefix(::Type{ROR}) = "https://ror.org/"
 
 
