@@ -94,6 +94,20 @@ end
 MalformedIdentifier{T}(input::I, problem::String) where {T, I} =
     MalformedIdentifier{T, I}(input, problem)
 
+function parsefor(::Type{T}, ::Type{I}, num::Union{<:AbstractString, <:AbstractChar}) where {T <: AcademicIdentifier, I <: Integer}
+    int = if num isa Char
+        try parse(I, num) catch end # See: <https://github.com/JuliaLang/julia/issues/45640>
+    else
+        tryparse(I, num)
+    end
+    isnothing(int) &&
+        (@noinline function(iT, inum)
+             nonint = if inum isa AbstractChar inum else filter(c -> c ∉ '0':'9', inum) end
+             throw(MalformedIdentifier{T}(inum, "includes invalid base 10 digit$(ifelse(length(nonint)==1, "", "s")) '$(nonint)'"))
+         end)(T, num)
+    int
+end
+
 """
     ChecksumViolation{T<:AcademicIdentifier}(id, checksum, expected) -> ChecksumViolation{T}
 
@@ -467,8 +481,8 @@ function ORCID(id::AbstractString)
         throw(MalformedIdentifier{ORCID}(id, "must be a 16-digit integer"))
     end
     iddigits..., checksum = orcdigits
-    id = parse(Int64, iddigits)
-    check = if uppercase(checksum) == 'X' 10 else parse(Int, checksum) end
+    id = parsefor(ORCID, UInt64, iddigits)
+    check = if uppercase(checksum) == 'X' 10 else parsefor(ORCID, UInt8, checksum) end
     ORCID(id, check)
 end
 
@@ -545,7 +559,7 @@ function ROR(num::AbstractString)
     char0, rest... = num
     char0 == '0' || throw(MalformedIdentifier{ROR}(num, "must start with '0'"))
     all(c -> c ∈ 'a':'z' || c ∈ 'A':'Z' || c ∈ '0':'9', rest) || throw(MalformedIdentifier{ROR}(num, "must only contain alphanumeric characters"))
-    ROR(croc32decode(Int, view(rest, 1:6)), parse(UInt, view(rest, 7:8)))
+    ROR(croc32decode(Int, view(rest, 1:6)), parsefor(ROR, UInt, view(rest, 7:8)))
 end
 
 idcode(ror::ROR) = ror.num
@@ -595,7 +609,7 @@ function PMID(id::AbstractString)
             return PMID(@view id[ncodeunits(prefix)+1:end])
         end
     end
-    PMID(parse(UInt, id))
+    PMID(parsefor(PMID, UInt, id))
 end
 
 idcode(pmid::PMID) = pmid.id
@@ -644,7 +658,7 @@ function PMCID(id::AbstractString)
             return PMCID(@view id[ncodeunits(prefix)+1:end])
         end
     end
-    PMCID(parse(UInt, id))
+    PMCID(parsefor(PMCID, UInt, id))
 end
 
 idcode(pmcid::PMCID) = pmcid.id
@@ -701,8 +715,8 @@ function ISSN(code::AbstractString)
         throw(MalformedIdentifier{ISSN}(code, "must be an 8-digit integer"))
     end
     iddigits..., checksum = issndigits
-    id = parse(Int32, iddigits)
-    check = if uppercase(checksum) == 'X' 10 else parse(Int, checksum) end
+    id = parsefor(ISSN, UInt32, iddigits)
+    check = if uppercase(checksum) == 'X' 10 else parsefor(ISSN, UInt8, checksum) end
     ISSN(id, check)
 end
 
@@ -748,7 +762,7 @@ function EAN13(code::AbstractString)
     if length(digits) > 13
         throw(MalformedIdentifier{EAN13}(code, "must be a 13-digit integer"))
     end
-    EAN13(parse(Int64, digits))
+    EAN13(parsefor(EAN13, UInt64, digits))
 end
 
 idcode(ean::EAN13) = Int((0x00001fffffffffff & ean.code) ÷ 10)
@@ -799,16 +813,16 @@ function ISBN(code::AbstractString)
     end
     plaincode = replace(code, '-' => "", ' ' => "")
     if length(plaincode) == 13
-        ISBN(parse(Int64, plaincode))
+        ISBN(parsefor(ISBN, UInt64, plaincode))
     elseif length(plaincode) == 10
         cdigits..., check = plaincode
-        dcode = parse(Int, cdigits)
+        dcode = parsefor(ISBN, UInt, cdigits)
         csum = 0
         for (i, digit) in enumerate(digits(dcode * 10, pad=10))
             csum += i * digit
         end
         cdigit = 11 - mod1(csum, 11)
-        checknum = if check == 'X' 10 else parse(Int, check) end
+        checknum = if check == 'X' 10 else parsefor(ISBN, UInt8, check) end
         if cdigit != checknum
             throw(ChecksumViolation{ISBN}(code, checknum, cdigit))
         end
@@ -910,7 +924,7 @@ end
 
 function Wikidata(id::AbstractString)
     if startswith(id, 'Q')
-        Wikidata(parse(UInt64, id[2:end]))
+        Wikidata(parsefor(Wikidata, UInt64, id[2:end]))
     else
         throw(MalformedIdentifier{Wikidata}(id, "must start with 'Q'"))
     end
