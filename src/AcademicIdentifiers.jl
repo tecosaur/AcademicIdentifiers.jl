@@ -431,9 +431,7 @@ end
 purlprefix(::Type{DOI}) = "https://doi.org/"
 shortcode(doi::DOI) = doi.registrant * '/' * doi.object
 
-function Base.print(io::IO, doi::DOI)
-    print(io, "doi:", shortcode(doi))
-end
+Base.print(io::IO, doi::DOI) = print(io, "doi:", shortcode(doi))
 
 
 # ORCID
