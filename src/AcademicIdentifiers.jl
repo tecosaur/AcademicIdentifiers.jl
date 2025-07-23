@@ -5,7 +5,7 @@ module AcademicIdentifiers
 
 using StyledStrings: @styled_str as @S_str
 
-export AcademicIdentifier, ArXiv, ArXivOld, DOI, EAN13, ISSN, ISBN, ORCID, ROR, PMID, PMCID, Wikidata
+export AcademicIdentifier, ArXiv, DOI, EAN13, ISSN, ISBN, ORCID, ROR, PMID, PMCID, Wikidata
 export shortcode, purl
 
 include("isbn-hyphenation.jl")
@@ -196,7 +196,7 @@ function Base.show(io::IO, ::MIME"text/plain", id::AcademicIdentifier)
 end
 
 
-# arXiv
+# ArXiv
 
 """
     ArXiv <: AcademicIdentifier
@@ -218,21 +218,46 @@ ArXiv:2001.12345
 
 julia> print(ArXiv("arXiv:2001.12345"))
 https://arxiv.org/abs/2001.12345
+
+julia> ArXiv("math.GT/0309136") # pre-2007 form
+ArXiv:math.GT/0309136
+
+julia> ArXiv("arxiv:hep-th/9901001v1")
+ArXiv:hep-th/9901001v1
 """
 struct ArXiv <: AcademicIdentifier
-    version::UInt8
-    year::UInt8
-    month::UInt8
+    meta::UInt32 # It's this or we go over 8 bytes
     number::UInt32
 end
 
 function ArXiv(id::AbstractString)
     if startswith(id, "https://arxiv.org/")
         prefixend = findnext('/', id, ncodeunits("https://arxiv.org/")+1)
-        return ArXiv(@view id[something(prefixend, ncodeunits("https://arxiv.org/")+1):end])
+        return ArXiv(@view id[something(prefixend, ncodeunits("https://arxiv.org/"))+1:end])
     elseif startswith(lowercase(id), "arxiv:")
         return ArXiv(@view id[ncodeunits("arxiv:")+1:end])
     end
+    if occursin('/', id)
+        arxiv_old(id)
+    else
+        arxiv_new(id)
+    end
+end
+
+arxiv_meta(archive::UInt8, class::UInt8, year::UInt8, month::UInt8, version::UInt8) =
+    UInt32(archive) << (32 - 5) +
+    UInt32(class) << (32 - 11) +
+    UInt32(year) << (32 - 18) +
+    UInt32(month) << (32 - 22) +
+    version
+
+arxiv_archive(arxiv::ArXiv) = (arxiv.meta >> (32 - 5)) % UInt8
+arxiv_class(arxiv::ArXiv) = 0x3f & (arxiv.meta >> (32 - 11)) % UInt8
+arxiv_year(arxiv::ArXiv) = 0x7f & (arxiv.meta >> (32 - 18)) % UInt8
+arxiv_month(arxiv::ArXiv) = 0x0f & (arxiv.meta >> (32 - 22)) % UInt8
+arxiv_version(arxiv::ArXiv) = arxiv.meta % UInt8
+
+function arxiv_new(id::AbstractString)
     code, verstr = if 'v' in id
         split(id, 'v', limit=2)
     else
@@ -250,57 +275,94 @@ function ArXiv(id::AbstractString)
     1 <= month <= 12 || throw(MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be between 01 and 12"))
     number = tryparse(UInt32, numstr)
     isnothing(number) && throw(MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must be an integer"))
-    ArXiv(version, year, month, number)
+    ArXiv(arxiv_meta(0x00, 0x00, year, month, version), number)
 end
 
-shortcode(arxiv::ArXiv) =
-    string(lpad(arxiv.year, 2, '0'), lpad(arxiv.month, 2, '0'),
-           '.', lpad(arxiv.number, ifelse(arxiv.year >= 15, 5, 4), '0'),
-           if arxiv.version > 0 'v' * arxiv.version else "" end)
+const ARXIV_OLD_ARCHIVES, ARXIV_OLD_CLASSES = let
+    arxiv_catsubs = (
+        "astro-ph" => ["CO", "EP", "GA", "HE", "IM", "SR"],
+        "cond-mat" => ["dis-nn", "mes-hall", "mtrl-sci", "other", "quant-gas", "soft", "stat-mech", "str-el", "supr-con"],
+        "cs" => ["AI", "AR", "CC", "CE", "CG", "CL", "CR", "CV", "CY", "DB", "DC", "DL", "DM", "DS", "ET",
+                 "FL", "GL", "GR", "GT", "HC", "IR", "IT", "LG", "LO", "MA", "MM", "MS", "NA", "NI", "OH",
+                 "OS", "PF", "PL", "RO", "SC", "SD", "SE", "SI", "SY"],
+        "econ" => ["EM", "GN", "TH"],
+        "eess" => ["AS", "IV", "SP", "SY"],
+        "gr-qc" => String[],
+        "hep-ex" => String[],
+        "hep-lat" => String[],
+        "hep-ph" => String[],
+        "hep-th" => String[],
+        "math-ph" => String[],
+        "math" => ["AC", "AG", "AP", "AT", "CA", "CO", "CT", "CV", "DG", "DS", "FA", "GM", "GN", "GR", "GT",
+                   "HO", "IT", "KT", "LO", "MG", "MP", "NA", "NT", "OA", "OC", "PR", "QA", "RA", "RT", "SG",
+                   "SP", "ST",],
+        "nlin" => ["AO", "CD", "CG", "PS", "SI"],
+        "nucl-ex" => String[],
+        "nucl-th" => String[],
+        "physics" => ["acc-ph", "ao-ph", "app-ph", "atm-clus", "atom-ph", "bio-ph", "chem-ph", "class-ph",
+                      "comp-ph", "data-an", "ed-pn", "flu-dyn", "gen-ph", "geo-ph", "hist-ph", "ins-det",
+                      "med-ph", "optics", "plasm-ph", "pop-ph", "soc-ph", "space-ph"],
+        "q-bio" => ["BM", "CB", "GN", "MN", "NC", "OT", "PE", "QM", "SC", "TO"],
+        "q-fin" => ["CP", "EC", "GN", "MF", "PM", "PR", "RM", "ST", "SR"],
+        "quant-ph" => String[],
+        "stat" => ["AP", "CO", "ME", "ML", "OT", "TH"])
+    map(first, arxiv_catsubs), map(last, arxiv_catsubs)
+end
+
+function arxiv_old(id::AbstractString)
+    '/' in id || throw(MalformedIdentifier{ArXiv}(id, "must contain a slash separating the components (archive.class/YYMMNNN)"))
+    archclass, numverstr = split(id, '/', limit=2)
+    archive, class = if '.' in archclass
+        archive, class = split(archclass, '.', limit=2)
+    else
+        archclass, ""
+    end
+    archiveidx = findfirst(==(archive), ARXIV_OLD_ARCHIVES)
+    isnothing(archiveidx) && throw(MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive name"))
+    classidx = if isempty(class)
+        0
+    else
+        findfirst(==(class), ARXIV_OLD_CLASSES[archiveidx])
+    end
+    isnothing(classidx) && throw(MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive class"))
+    length(class) ∈ (0, 2) || throw(MalformedIdentifier{ArXiv}(id, "class component must be 2 characters"))
+    numstr, verstr = if 'v' in numverstr
+        split(numverstr, 'v', limit=2)
+    else
+        numverstr, "0"
+    end
+    version = tryparse(UInt8, verstr)
+    isnothing(version) && throw(MalformedIdentifier{ArXiv}(id, "version must be an integer"))
+    length(numstr) == 7 || throw(MalformedIdentifier{ArXiv}(id, "number component must be 7 characters (YYMMNNN)"))
+    year = tryparse(UInt8, @view numstr[1:nextind(numstr, 1)])
+    isnothing(year) && throw(MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be an integer"))
+    (year >= 91 || year <= 7) || throw(MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be between 91 and 07"))
+    month = tryparse(UInt8, @view numstr[3:nextind(numstr, 3)])
+    isnothing(month) && throw(MalformedIdentifier{ArXiv}(id, "month component (yyMMnnn) must be an integer"))
+    1 <= month <= 12 || throw(MalformedIdentifier{ArXiv}(id, "month component (yyMMnnn) must be between 01 and 12"))
+    num = tryparse(UInt16, @view numstr[5:nextind(numstr, 5, 2)])
+    isnothing(num) && throw(MalformedIdentifier{ArXiv}(id, "number component (yymmNNN) must be an integer"))
+    ArXiv(arxiv_meta(archiveidx % UInt8, classidx % UInt8, year, month, version), num)
+end
+
+function shortcode(arxiv::ArXiv)
+    archid, classid = arxiv_archive(arxiv), arxiv_class(arxiv)
+    year, month, ver = arxiv_year(arxiv), arxiv_month(arxiv), arxiv_version(arxiv)
+    verstr = if ver > 0 string('v', ver) else "" end
+    if iszero(archid) # New form
+        string(lpad(year, 2, '0'), lpad(month, 2, '0'),
+               '.', lpad(arxiv.number, ifelse(year >= 15, 5, 4), '0'),
+               verstr)
+    else # Old form
+        archive = ARXIV_OLD_ARCHIVES[archid]
+        class = if iszero(classid) "" else ARXIV_OLD_CLASSES[archid][classid] end
+        string(archive, ifelse(iszero(classid), "", "."), class, '/',
+               lpad(year, 2, '0'), lpad(month, 2, '0'), lpad(arxiv.number, 3, '0'),
+               verstr)
+    end
+end
 
 purlprefix(::Type{ArXiv}) = "https://arxiv.org/abs/"
-
-
-# ArXivOld (1991 to March 2007)
-
-struct ArXivOld <: AcademicIdentifier
-    archive::String
-    class::String
-    year::UInt8
-    month::UInt8
-    number::UInt16
-end
-
-function ArXivOld(id::AbstractString)
-    if startswith(id, "https://arxiv.org/")
-        prefixend = findnext('/', id, ncodeunits("https://arxiv.org/")+1)
-        return ArXivOld(@view id[something(prefixend, ncodeunits("https://arxiv.org/")+1):end])
-    elseif startswith(lowercase(id), "arxiv:")
-        return ArXivOld(@view id[ncodeunits("arxiv:")+1:end])
-    end
-    '/' in id || throw(MalformedIdentifier{ArXivOld}(id, "must contain a slash separating the components (archive.class/YYMMNNN)"))
-    archclass, numstr = split(id, '/', limit=2)
-    '.' in archclass || throw(MalformedIdentifier{ArXivOld}(id, "archive.class component must contain a period"))
-    archive, class = split(archclass, '.', limit=2)
-    length(class) == 2 || throw(MalformedIdentifier{ArXivOld}(id, "class component must be 2 characters"))
-    length(numstr) == 7 || throw(MalformedIdentifier{ArXivOld}(id, "number component must be 7 characters (YYMMNNN)"))
-    year = tryparse(UInt8, @view numstr[1:2])
-    isnothing(year) && throw(MalformedIdentifier{ArXivOld}(id, "year component (YYmmnnn) must be an integer"))
-    (year >= 91 || year <= 7) || throw(MalformedIdentifier{ArXivOld}(id, "year component (YYmmnnn) must be between 91 and 07"))
-    month = tryparse(UInt8, @view numstr[3:4])
-    isnothing(month) && throw(MalformedIdentifier{ArXivOld}(id, "month component (yyMMnnn) must be an integer"))
-    1 <= month <= 12 || throw(MalformedIdentifier{ArXivOld}(id, "month component (yyMMnnn) must be between 01 and 12"))
-    num = tryparse(UInt16, @view numstr[5:7])
-    isnothing(num) && throw(MalformedIdentifier{ArXivOld}(id, "number component (yymmNNN) must be an integer"))
-    ArXivOld(archive, class, year, month, num)
-end
-
-shortcode(arxiv::ArXivOld) =
-    string(arxiv.archive, '.', arxiv.class, '/', lpad(arxiv.year, 2, '0'),
-           lpad(arxiv.month, 2, '0'), lpad(arxiv.number, 3, '0'))
-
-purl(arxiv::ArXivOld) = "https://arxiv.org/abs/$(arxiv.archive)/" * lpads(arxiv.year, 2, '0') *
-                        lpads(arxiv.month, 2, '0') * lpads(arxiv.number, 3, '0')
 
 
 # DOI
