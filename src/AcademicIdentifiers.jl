@@ -789,7 +789,7 @@ Base.convert(::Type{EAN13}, isbn::ISBN) = isbn.code
 
 An International Standard Book Number (ISBN) is a unique identifier for books and book-like
 publications. It consists of a 10-digit integer with a checksum digit. ISBNs can also be 13-digit
-EAN-13 codes starting with 978.
+EAN-13 codes starting with 978 or 979.
 
 Invalid ISBNs will throw a `MalformedIdentifier` exception, and identifiers with an incorrect
 checksum will throw a `ChecksumViolation` exception.
@@ -803,7 +803,7 @@ ISBN("0-14-143956-4")
 """
 function ISBN(code::Integer)
     ndigits(code) == 13 || throw(MalformedIdentifier{ISBN}(code, "must be a 13-digit integer"))
-    code ÷ 10^10 == 978 || throw(MalformedIdentifier{ISBN}(code, "must start with 978"))
+    code ÷ 10^10 ∈ (978, 979) || throw(MalformedIdentifier{ISBN}(code, "must start with 978 or 979"))
     ISBN(EAN13(code))
 end
 
@@ -842,8 +842,8 @@ idchecksum(isbn::ISBN) = idchecksum(isbn.code)
 shortcode(isbn::ISBN) = string(isbn)
 
 function Base.convert(::Type{ISBN}, ean::EAN13)
-    if idcode(ean) ÷ 10^10 != 978
-        throw(MalformedIdentifier{ISBN}(idcode(ean), "must start with 978"))
+    if idcode(ean) ÷ 10^9 ∉ (978, 979)
+        throw(MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979"))
     end
     ISBN(ean)
 end
