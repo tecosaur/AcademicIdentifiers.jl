@@ -501,7 +501,7 @@ purlprefix(::Type{ORCID}) = "https://orcid.org/"
 # ROR
 
 Base.@assume_effects :foldable function croc32decode(::Type{T}, str::AbstractString) where {T <: Integer}
-    svec = collect(codeunits(lowercase(str)))
+    svec = codeunits(str) .| 0x20 # Convert to lowercase
     skipchars = UInt8.(('i', 'l', 'o', 'u'))
     svec .= svec .- (UInt8(count(s .> skipchars)) for s in svec)
     parse(T, String(svec), base=32)
