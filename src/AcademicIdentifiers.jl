@@ -861,47 +861,74 @@ function Base.print(io::IO, isbn::ISBN)
     else
         978, idcode(isbn) * 10 + idchecksum(isbn)
     end
-    unhyphenated, last3 = divrem(code10, 1000)
-    codegroup, groupstr = 0, ""
-    for (prefix3, class) in ISBN_GROUP_HYPHENATION
-        prefix3 == code3 || continue
+    # Find group length by checking which range the first 7 digits fall into
+    first7 = code10 ÷ 1000
+    group_length = 0
+    for (prefix, class) in ISBN_GROUP_HYPHENATION
+        prefix == code3 || continue
         for (len, range) in class
-            first(range) <= unhyphenated <= last(range) || continue
-            if len > 0
-                codegroup, unhyphenated = divrem(unhyphenated, 10^(7 - len))
-                groupstr = lpad(codegroup, len, '0')
-            end
+            len > 0 && first(range) ≤ first7 ≤ last(range) || continue
+            group_length = len
             break
         end
-        break
+        group_length > 0 && break
     end
-    pubstr = ""
-    for (prefix3, classes) in ISBN_PUB_HYPHENATION
-        prefix3 == code3 || continue
-        for (prefixgroup, class) in classes
-            prefixgroup == codegroup || continue
+    # Extract group and remaining digits using arithmetic
+    codegroup, remaining_after_group = if group_length > 0
+        divrem(code10, 10^(10 - group_length))
+    else
+        0, code10
+    end
+    # Find publisher length by checking which range the remaining digits fall into
+    remaining_digits = 10 - group_length
+    remaining_padded = if remaining_digits < 7
+        remaining_after_group * 10^(7 - remaining_digits)
+    else
+        remaining_after_group ÷ 10^(remaining_digits - 7)
+    end
+    publisher_length = 0
+    for (prefix, classes) in ISBN_PUB_HYPHENATION
+        prefix == code3 || continue
+        for (group_code, class) in classes
+            group_code == codegroup || continue
             for (len, range) in class
-                first(range) <= unhyphenated <= last(range) || continue
-                if len > 0
-                    codepub, unhyphenated = divrem(unhyphenated, 10^(7 - ncodeunits(groupstr) - len))
-                    pubstr = lpad(codepub, len, '0')
-                end
+                len > 0 && first(range) ≤ remaining_padded ≤ last(range) || continue
+                publisher_length = len
                 break
             end
+            publisher_length > 0 && break
         end
-        break
+        publisher_length > 0 && break
     end
-    unhyphenated = 1000 * unhyphenated + last3
-    unhyphenated, checkdigit = divrem(unhyphenated, 10)
-    iszero(flag) && print(io, code3, '-')
-    !isempty(groupstr) && print(io, groupstr, '-')
-    !isempty(pubstr) && print(io, pubstr, '-')
-    print(io, unhyphenated, '-')
-    if !iszero(flag)
-        cdigit = Int8(flag & 0x00ff)
-        print(io, if cdigit == 10 'X' else cdigit end)
+    # Extract publisher, title, and check digit using mathematical operations
+    if publisher_length > 0
+        publisher, title_and_check = divrem(remaining_after_group, 10^(remaining_digits - publisher_length))
     else
-        print(io, checkdigit)
+        publisher, title_and_check = 0, remaining_after_group
+    end
+    # Split title and check digit
+    if title_and_check ≥ 10
+        title, check_digit = divrem(title_and_check, 10)
+    else
+        title, check_digit = 0, title_and_check
+    end
+    # Print the hyphenated ISBN with proper padding
+    iszero(flag) && print(io, code3, '-')
+    group_length > 0 && print(io, lpad(codegroup, group_length, '0'), '-')
+    publisher_length > 0 && print(io, lpad(publisher, publisher_length, '0'), '-')
+    # Calculate title length and pad appropriately
+    title_length = remaining_digits - publisher_length - 1
+    0 < title_length ≤ 9 && print(io, lpad(title, title_length, '0'))
+    print(io, '-')
+    if iszero(flag)
+        print(io, check_digit)
+    else
+        check_char = Int8(flag & 0x00ff)
+        if check_char == 10
+            print(io, 'X')
+        else
+            print(io, check_char)
+        end
     end
 end
 
