@@ -199,9 +199,17 @@ function Base.show(io::IO, id::AcademicIdentifier)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", id::AcademicIdentifier)
-    label = nameof(typeof(id))
+    label = String(nameof(typeof(id)))
     url = purl(id)
-    idstr = shortcode(id)
+    idstr = SubString(shortcode(id))
+    idstr = if ':' in idstr
+        chopprefix(idstr, label * ':')
+    else
+        chopprefix(idstr, label)
+    end
+    if endswith(label, "ID")
+        idstr = chopprefix(idstr, chopsuffix(label, "ID"))
+    end
     if isnothing(url)
         print(io, S"{bold:$label:}$idstr")
     else
@@ -662,7 +670,7 @@ function PMCID(id::AbstractString)
 end
 
 idcode(pmcid::PMCID) = pmcid.id
-shortcode(pmcid::PMCID) = lpad(string(pmcid.id), 8, '0')
+shortcode(pmcid::PMCID) = string("PMC", pmcid.id)
 purlprefix(::Type{PMCID}) = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
 
 
