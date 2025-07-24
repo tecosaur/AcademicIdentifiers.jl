@@ -23,7 +23,7 @@ function, and similarly the checksum (when applicable) using the ~checksum~
 accessor function.
 
 #+begin_src julia
-(::Type{<:AcademicIdentifier})(representation::String) -> T
+parse(::Type{T<:AcademicIdentifier}, representation::String) -> T
 
 shortcode(id::AcademicIdentifier) -> String (minimal form)
 purl(id::AcademicIdentifier) -> Union{String, Nothing}

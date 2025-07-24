@@ -32,8 +32,8 @@ Your academic identifier, named `AId` for example, must be able to be constructe
 from its canonical form as well as the plain form (these may be the same).
 
 ```julia
-AId("canonical string form") -> AId
-AId("minimal plain form") -> AId
+parse(AId, "canonical string form") -> AId
+parse(AId, "minimal plain form") -> AId
 shortcode(::AId) -> String
 ```
 
@@ -80,6 +80,17 @@ Invariants:
 """
 abstract type AcademicIdentifier end
 
+function Base.parse(::Type{T}, input::AbstractString) where {T <: AcademicIdentifier}
+    id = parseid(T, input)
+    id isa T || throw(id)
+    id
+end
+
+function Base.tryparse(::Type{T}, input::AbstractString) where {T <: AcademicIdentifier}
+    id = parseid(T, input)
+    if id isa T id end
+end
+
 """
     MalformedIdentifier{T<:AcademicIdentifier}(input, problem::String) -> MalformedIdentifier{T}
 
@@ -100,12 +111,14 @@ function parsefor(::Type{T}, ::Type{I}, num::Union{<:AbstractString, <:AbstractC
     else
         tryparse(I, num)
     end
-    isnothing(int) &&
+    if isnothing(int)
         (@noinline function(iT, inum)
              nonint = if inum isa AbstractChar inum else filter(c -> c ∉ '0':'9', inum) end
-             throw(MalformedIdentifier{T}(inum, "includes invalid base 10 digit$(ifelse(length(nonint)==1, "", "s")) '$(nonint)'"))
+             MalformedIdentifier{T}(inum, "includes invalid base 10 digit$(ifelse(length(nonint)==1, "", "s")) '$(nonint)'")
          end)(T, num)
-    int
+    else
+        int
+    end
 end
 
 """
@@ -192,10 +205,8 @@ function Base.print(io::IO, id::AcademicIdentifier)
 end
 
 function Base.show(io::IO, id::AcademicIdentifier)
-    show(io, typeof(id))
-    print(io, '(')
-    show(io, shortcode(id))
-    print(io, ')')
+    show(io, parse)
+    show(io, (typeof(id), shortcode(id)))
 end
 
 function Base.show(io::IO, ::MIME"text/plain", id::AcademicIdentifier)
@@ -217,7 +228,7 @@ function Base.show(io::IO, ::MIME"text/plain", id::AcademicIdentifier)
     end
 end
 
-
+ 
 # ArXiv
 
 """
@@ -232,19 +243,19 @@ A version number can be appended to the identifier, separated by a 'v'.
 # Examples
 
 ```julia
-julia> ArXiv("2001.12345")
+julia> parse(ArXiv, "2001.12345")
 ArXiv:2001.12345
 
-julia> ArXiv("https://arxiv.org/abs/2001.12345")
+julia> parse(ArXiv, "https://arxiv.org/abs/2001.12345")
 ArXiv:2001.12345
 
-julia> print(ArXiv("arXiv:2001.12345"))
-https://arxiv.org/abs/2001.12345
+julia> purl(parse(ArXiv, "arXiv:2001.12345"))
+"https://arxiv.org/abs/2001.12345"
 
-julia> ArXiv("math.GT/0309136") # pre-2007 form
+julia> parse(ArXiv, "math.GT/0309136") # pre-2007 form
 ArXiv:math.GT/0309136
 
-julia> ArXiv("arxiv:hep-th/9901001v1")
+julia> parse(ArXiv, "arxiv:hep-th/9901001v1")
 ArXiv:hep-th/9901001v1
 """
 struct ArXiv <: AcademicIdentifier
@@ -252,14 +263,13 @@ struct ArXiv <: AcademicIdentifier
     number::UInt32
 end
 
-function ArXiv(id::AbstractString)
+function parseid(::Type{ArXiv}, id::AbstractString)
     if startswith(id, "https://arxiv.org/")
         prefixend = findnext('/', id, ncodeunits("https://arxiv.org/")+1)
-        return ArXiv(@view id[something(prefixend, ncodeunits("https://arxiv.org/"))+1:end])
+        parseid(ArXiv, @view id[something(prefixend, ncodeunits("https://arxiv.org/"))+1:end])
     elseif startswith(lowercase(id), "arxiv:")
-        return ArXiv(@view id[ncodeunits("arxiv:")+1:end])
-    end
-    if occursin('/', id)
+        parseid(ArXiv, @view id[ncodeunits("arxiv:")+1:end])
+    elseif occursin('/', id)
         arxiv_old(id)
     else
         arxiv_new(id)
@@ -286,17 +296,17 @@ function arxiv_new(id::AbstractString)
         id, "0"
     end
     version = tryparse(UInt8, verstr)
-    isnothing(version) && throw(MalformedIdentifier{ArXiv}(id, "version must be an integer"))
-    '.' in code || throw(MalformedIdentifier{ArXiv}(id, "must contain a period separating the date and number component (YYMM.NNNNN)"))
+    isnothing(version) && return MalformedIdentifier{ArXiv}(id, "version must be an integer")
+    '.' in code || return MalformedIdentifier{ArXiv}(id, "must contain a period separating the date and number component (YYMM.NNNNN)")
     datestr, numstr = split(code, '.', limit=2)
-    all(isdigit, datestr) && ncodeunits(datestr) == 4 || throw(MalformedIdentifier{ArXiv}(id, "date component must be 4 digits (YYMM.nnnnn)"))
+    all(isdigit, datestr) && ncodeunits(datestr) == 4 || return MalformedIdentifier{ArXiv}(id, "date component must be 4 digits (YYMM.nnnnn)")
     year = tryparse(UInt8, @view datestr[1:2])
-    isnothing(year) && throw(MalformedIdentifier{ArXiv}(id, "year component (YYmm.nnnnn) must be an integer"))
+    isnothing(year) && return MalformedIdentifier{ArXiv}(id, "year component (YYmm.nnnnn) must be an integer")
     month = tryparse(UInt8, @view datestr[3:4])
-    isnothing(month) && throw(MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be an integer"))
-    1 <= month <= 12 || throw(MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be between 01 and 12"))
+    isnothing(month) && return MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be an integer")
+    1 <= month <= 12 || return MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be between 01 and 12")
     number = tryparse(UInt32, numstr)
-    isnothing(number) && throw(MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must be an integer"))
+    isnothing(number) && return MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must be an integer")
     ArXiv(arxiv_meta(0x00, 0x00, year, month, version), number)
 end
 
@@ -332,7 +342,7 @@ const ARXIV_OLD_ARCHIVES, ARXIV_OLD_CLASSES = let
 end
 
 function arxiv_old(id::AbstractString)
-    '/' in id || throw(MalformedIdentifier{ArXiv}(id, "must contain a slash separating the components (archive.class/YYMMNNN)"))
+    '/' in id || return MalformedIdentifier{ArXiv}(id, "must contain a slash separating the components (archive.class/YYMMNNN)")
     archclass, numverstr = split(id, '/', limit=2)
     archive, class = if '.' in archclass
         archive, class = split(archclass, '.', limit=2)
@@ -340,30 +350,30 @@ function arxiv_old(id::AbstractString)
         archclass, ""
     end
     archiveidx = findfirst(==(archive), ARXIV_OLD_ARCHIVES)
-    isnothing(archiveidx) && throw(MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive name"))
+    isnothing(archiveidx) && return MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive name")
     classidx = if isempty(class)
         0
     else
         findfirst(==(class), ARXIV_OLD_CLASSES[archiveidx])
     end
-    isnothing(classidx) && throw(MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive class"))
-    length(class) ∈ (0, 2) || throw(MalformedIdentifier{ArXiv}(id, "class component must be 2 characters"))
+    isnothing(classidx) && return MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive class")
+    length(class) ∈ (0, 2) || return MalformedIdentifier{ArXiv}(id, "class component must be 2 characters")
     numstr, verstr = if 'v' in numverstr
         split(numverstr, 'v', limit=2)
     else
         numverstr, "0"
     end
     version = tryparse(UInt8, verstr)
-    isnothing(version) && throw(MalformedIdentifier{ArXiv}(id, "version must be an integer"))
-    length(numstr) == 7 || throw(MalformedIdentifier{ArXiv}(id, "number component must be 7 characters (YYMMNNN)"))
+    isnothing(version) && return MalformedIdentifier{ArXiv}(id, "version must be an integer")
+    length(numstr) == 7 || return MalformedIdentifier{ArXiv}(id, "number component must be 7 characters (YYMMNNN)")
     year = tryparse(UInt8, @view numstr[1:nextind(numstr, 1)])
-    isnothing(year) && throw(MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be an integer"))
-    (year >= 91 || year <= 7) || throw(MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be between 91 and 07"))
+    isnothing(year) && return MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be an integer")
+    (year >= 91 || year <= 7) || return MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be between 91 and 07")
     month = tryparse(UInt8, @view numstr[3:nextind(numstr, 3)])
-    isnothing(month) && throw(MalformedIdentifier{ArXiv}(id, "month component (yyMMnnn) must be an integer"))
-    1 <= month <= 12 || throw(MalformedIdentifier{ArXiv}(id, "month component (yyMMnnn) must be between 01 and 12"))
+    isnothing(month) && return MalformedIdentifier{ArXiv}(id, "month component (yyMMnnn) must be an integer")
+    1 <= month <= 12 || return MalformedIdentifier{ArXiv}(id, "month component (yyMMnnn) must be between 01 and 12")
     num = tryparse(UInt16, @view numstr[5:nextind(numstr, 5, 2)])
-    isnothing(num) && throw(MalformedIdentifier{ArXiv}(id, "number component (yymmNNN) must be an integer"))
+    isnothing(num) && return MalformedIdentifier{ArXiv}(id, "number component (yymmNNN) must be an integer")
     ArXiv(arxiv_meta(archiveidx % UInt8, classidx % UInt8, year, month, version), num)
 end
 
@@ -398,14 +408,14 @@ a dataset. It consists of a registrant prefix and an object suffix separated by 
 # Examples
 
 ```julia
-julia> DOI("10.1145/3276490")
+julia> parse(DOI, "10.1145/3276490")
 doi:10.1145/3276490
 
-julia> DOI("https://doi.org/10.1137/141000671")
-doi:10.1137/141000671
+julia> parse(DOI, "https://doi.org/10.1137/141000671")
+DOI:10.1137/141000671
 
-julia> println(DOI("10.1145/3276490"))
-10.1145/3276490
+julia> println(parse(DOI, "10.1145/3276490"))
+doi:10.1145/3276490
 ```
 """
 struct DOI <: AcademicIdentifier
@@ -413,12 +423,13 @@ struct DOI <: AcademicIdentifier
     object::String
 end
 
-function DOI(doi::AbstractString)
+function parseid(::Type{DOI}, doi::AbstractString)
     ldoi = lowercase(doi)
-    for prefix in ("doi:", "doi.org/", "http://doi.org/", "https://doi.org/")
-        if startswith(ldoi, prefix)
-            return DOI(@view doi[ncodeunits(prefix)+1:end])
-        end
+    for prefix in ("doi:", "doi.org/", "dx.doi.org/",
+                   "http://doi.org/", "http://dx.doi.org/",
+                   "https://doi.org/", "https://dx.doi.org/")
+        startswith(ldoi, prefix) &&
+            return parseid(DOI, @view doi[ncodeunits(prefix)+1:end])
     end
     if '/' in doi
         registrant, object = split(doi, '/', limit=2)
@@ -432,6 +443,8 @@ purlprefix(::Type{DOI}) = "https://doi.org/"
 shortcode(doi::DOI) = doi.registrant * '/' * doi.object
 
 Base.print(io::IO, doi::DOI) = print(io, "doi:", shortcode(doi))
+
+Base.show(io::IO, doi::DOI) = (show(io, DOI); show(io, (doi.registrant, doi.object)))
 
 
 # ORCID
@@ -448,13 +461,13 @@ incorrect checksum will throw a `ChecksumViolation` exception.
 # Examples
 
 ```julia
-julia> ORCID("https://orcid.org/0000-0001-5109-3700")
+julia> parse(ORCID, "https://orcid.org/0000-0001-5109-3700")
 ORCID:https://orcid.org/0000-0001-5109-3700
 
-julia> println(ORCID("0000-0001-5109-3700"))
+julia> println(parse(ORCID, "0000-0001-5109-3700"))
 https://orcid.org/0000-0001-5109-3700
 
-julia> ORCID("0000-0001-5109-3701")
+julia> parse(ORCID, "0000-0001-5109-3701")
 ERROR: Checksum violation: the correct checksum for ORCID identifier 15109370 is 0 but got 1
 ````
 """
@@ -475,20 +488,21 @@ struct ORCID <: AcademicIdentifier
     end
 end
 
-function ORCID(id::AbstractString)
+function parseid(::Type{ORCID}, id::AbstractString)
     lid = lowercase(id)
     for prefix in ("orcid:", "orcid.org/", "https://orcid.org/")
-        if startswith(lid, prefix)
-            return ORCID(@view id[ncodeunits(prefix)+1:end])
-        end
+        startswith(lid, prefix) &&
+            return parseid(ORCID, @view id[ncodeunits(prefix)+1:end])
     end
     orcdigits = replace(id, '-' => "")
     if length(orcdigits) > 16
-        throw(MalformedIdentifier{ORCID}(id, "must be a 16-digit integer"))
+        return MalformedIdentifier{ORCID}(id, "must be a 16-digit integer")
     end
     iddigits..., checksum = orcdigits
     id = parsefor(ORCID, UInt64, iddigits)
-    check = if uppercase(checksum) == 'X' 10 else parsefor(ORCID, UInt8, checksum) end
+    id isa UInt64 || return id
+    check = if uppercase(checksum) == 'X' 0x0a else parsefor(ORCID, UInt8, checksum) end
+    check isa UInt8 || return check
     ORCID(id, check)
 end
 
@@ -532,13 +546,13 @@ incorrect checksum will throw a `ChecksumViolation` exception.
 # Examples
 
 ```julia
-julia> ROR("https://ror.org/05cy4wa09")
+julia> parse(ROR, "https://ror.org/05cy4wa09")
 ROR:05cy4wa09
 
-julia> print(ROR("05cy4wa09"))
+julia> print(parse(ROR, "05cy4wa09"))
 https://ror.org/05cy4wa09
 
-julia> ROR("05cy4wa08")
+julia> parse(ROR, "05cy4wa08")
 ERROR: Checksum violation: the correct checksum for ROR identifier 05cy4wa is 9 but got 8
 ````
 """
@@ -555,17 +569,18 @@ struct ROR <: AcademicIdentifier
     end
 end
 
-function ROR(num::AbstractString)
+function parseid(::Type{ROR}, num::AbstractString)
     for prefix in ("ror:", "ror.org/", "https://ror.org/")
-        if startswith(lowercase(num), prefix)
-            return ROR(@view num[ncodeunits(prefix)+1:end])
-        end
+        startswith(lowercase(num), prefix) &&
+            return parseid(ROR, @view num[ncodeunits(prefix)+1:end])
     end
-    length(num) == 9 || throw(MalformedIdentifier{ROR}(num, "must be 9 characters long"))
+    length(num) == 9 || return MalformedIdentifier{ROR}(num, "must be 9 characters long")
     char0, rest... = num
-    char0 == '0' || throw(MalformedIdentifier{ROR}(num, "must start with '0'"))
-    all(c -> c ∈ 'a':'z' || c ∈ 'A':'Z' || c ∈ '0':'9', rest) || throw(MalformedIdentifier{ROR}(num, "must only contain alphanumeric characters"))
-    ROR(croc32decode(Int, view(rest, 1:6)), parsefor(ROR, UInt, view(rest, 7:8)))
+    char0 == '0' || return MalformedIdentifier{ROR}(num, "must start with '0'")
+    all(c -> c ∈ 'a':'z' || c ∈ 'A':'Z' || c ∈ '0':'9', rest) || return MalformedIdentifier{ROR}(num, "must only contain alphanumeric characters")
+    check = parsefor(ROR, UInt, view(rest, 7:8))
+    check isa UInt || return check
+    ROR(croc32decode(Int, view(rest, 1:6)), check)
 end
 
 idcode(ror::ROR) = ror.num
@@ -592,7 +607,7 @@ which are specifically used by PubMed Central but are distinct from PMIDs.
 julia> PMID(28984872)
 PMID:28984872
 
-julia> PMID("https://pubmed.ncbi.nlm.nih.gov/28984872")
+julia> parse(PMID, "https://pubmed.ncbi.nlm.nih.gov/28984872")
 PMID:28984872
 
 julia> PMID(123456789)
@@ -608,19 +623,22 @@ struct PMID <: AcademicIdentifier
     end
 end
 
-function PMID(id::AbstractString)
+function parseid(::Type{PMID}, id::AbstractString)
     lid = lowercase(id)
     for prefix in ("pmid:", "pubmed.ncbi.nlm.nih.gov/", "https://pubmed.ncbi.nlm.nih.gov/")
-        if startswith(lid, prefix)
-            return PMID(@view id[ncodeunits(prefix)+1:end])
-        end
+        startswith(lid, prefix) &&
+            return parseid(PMID, @view id[ncodeunits(prefix)+1:end])
     end
-    PMID(parsefor(PMID, UInt, id))
+    pint = parsefor(PMID, UInt, id)
+    pint isa UInt || return pint
+    PMID(pint)
 end
 
 idcode(pmid::PMID) = pmid.id
 shortcode(pmid::PMID) = string(pmid.id)
 purlprefix(::Type{PMID}) = "https://pubmed.ncbi.nlm.nih.gov/"
+
+Base.show(io::IO, pmid::PMID) = (show(io, PMID); print(io, '(', pmid.id, ')'))
 
 
 # PMCID
@@ -638,7 +656,7 @@ which are specifically used by PubMed but are distinct from PMCIDs.
 # Examples
 
 ```julia
-julia> PMCID("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC012345678")
+julia> parse(PMCID, "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC012345678")
 PMCID:12345678
 
 julia> println(PMCID(12345678))
@@ -657,19 +675,22 @@ struct PMCID <: AcademicIdentifier
     end
 end
 
-function PMCID(id::AbstractString)
+function parseid(::Type{PMCID}, id::AbstractString)
     lid = lowercase(id)
     for prefix in ("pmc", "pmcid:", "https://www.ncbi.nlm.nih.gov/pmc/articles/")
-        if startswith(lid, prefix)
-            return PMCID(@view id[ncodeunits(prefix)+1:end])
-        end
+        startswith(lid, prefix) &&
+            return parseid(PMCID, @view id[ncodeunits(prefix)+1:end])
     end
-    PMCID(parsefor(PMCID, UInt, id))
+    pint = parsefor(PMCID, UInt, id)
+    pint isa UInt || return pint
+    PMCID(pint)
 end
 
 idcode(pmcid::PMCID) = pmcid.id
 shortcode(pmcid::PMCID) = string("PMC", pmcid.id)
 purlprefix(::Type{PMCID}) = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
+
+Base.show(io::IO, pmcid::PMCID) = (show(io, PMCID); print(io, '(', pmcid.id, ')'))
 
 
 # ISSN
@@ -685,10 +706,10 @@ incorrect checksum will throw a `ChecksumViolation` exception.
 # Examples
 
 ```julia
-julia> ISSN("1095-5054")
+julia> parse(ISSN, "1095-5054")
 ISSN:1095-5054
 
-julia> ISSN("1095-5053")
+julia> parse(ISSN, "1095-5053")
 ERROR: Checksum violation: the correct checksum for ISSN identifier 1095505 is 4 but got 3
 ```
 """
@@ -709,20 +730,21 @@ struct ISSN <: AcademicIdentifier
     end
 end
 
-function ISSN(code::AbstractString)
+function parseid(::Type{ISSN}, code::AbstractString)
     lcode = lowercase(code)
     for prefix in ("issn:", "issn", "https://portal.issn.org/resource/ISSN/")
-        if startswith(lcode, prefix)
-            return ISSN(@view code[ncodeunits(prefix)+1:end])
-        end
+        startswith(lcode, prefix) &&
+            return parseid(ISSN, @view code[ncodeunits(prefix)+1:end])
     end
     issndigits = replace(code, '-' => "")
     if length(issndigits) > 8
-        throw(MalformedIdentifier{ISSN}(code, "must be an 8-digit integer"))
+        return MalformedIdentifier{ISSN}(code, "must be an 8-digit integer")
     end
     iddigits..., checksum = issndigits
     id = parsefor(ISSN, UInt32, iddigits)
-    check = if uppercase(checksum) == 'X' 10 else parsefor(ISSN, UInt8, checksum) end
+    id isa UInt32 || return id
+    check = if uppercase(checksum) == 'X' 0x0a else parsefor(ISSN, UInt8, checksum) end
+    check isa UInt8 || return check
     ISSN(id, check)
 end
 
@@ -751,16 +773,16 @@ incorrect checksum will throw a `ChecksumViolation` exception.
 # Examples
 
 ```julia
-julia> EAN13("9780596520687")
+julia> parse(EAN13, "9780596520687")
 EAN13:9780596520687
 
-julia> EAN13("978-0-596-52068-7")
+julia> parse(EAN13, "978-0-596-52068-7")
 EAN13:9780596520687
 
-julia> println(EAN13("9780596520687"))
+julia> println(parse(EAN13, "9780596520687"))
 9780596520687
 
-julia> EAN13("9780596520688")
+julia> parse(EAN13, "9780596520688")
 ERROR: Checksum violation: the correct checksum for EAN13 identifier 978059652068 is 7 but got 8
 ```
 """
@@ -789,12 +811,14 @@ function EAN13(code::Integer)
     EAN13(idcode, checksum)
 end
 
-function EAN13(code::AbstractString)
+function parseid(::Type{EAN13}, code::AbstractString)
     digits = replace(code, '-' => "")
     if length(digits) > 13
-        throw(MalformedIdentifier{EAN13}(code, "must be a 13-digit integer"))
+        return MalformedIdentifier{EAN13}(code, "must be a 13-digit integer")
     end
-    EAN13(parsefor(EAN13, UInt64, digits))
+    eint = parsefor(EAN13, UInt64, digits)
+    eint isa UInt64 || return eint
+    EAN13(eint)
 end
 
 idcode(ean::EAN13) = Int((0x00001fffffffffff & ean.code) ÷ 10)
@@ -829,7 +853,7 @@ checksum will throw a `ChecksumViolation` exception.
 # Examples
 
 ```julia
-julia> ISBN("0141439564")
+julia> parse(ISBN, "0141439564")
 ISBN("0-14-143956-4")
 ```
 """
@@ -839,24 +863,27 @@ function ISBN(code::Integer)
     ISBN(EAN13(code))
 end
 
-function ISBN(code::AbstractString)
-    if startswith(lowercase(code), "isbn:")
-        return ISBN(@view code[ncodeunits("isbn:")+1:end])
-    end
+function parseid(::Type{ISBN}, code::AbstractString)
+    startswith(lowercase(code), "isbn:") &&
+        return parseid(ISBN, @view code[ncodeunits("isbn:")+1:end])
     plaincode = replace(code, '-' => "", ' ' => "")
     if length(plaincode) == 13
-        ISBN(parsefor(ISBN, UInt64, plaincode))
+        iint = parsefor(ISBN, UInt64, plaincode)
+        iint isa UInt64 || return iint
+        ISBN(iint)
     elseif length(plaincode) == 10
         cdigits..., check = plaincode
         dcode = parsefor(ISBN, UInt, cdigits)
+        dcode isa UInt || return dcode
         csum = 0
         for (i, digit) in enumerate(digits(dcode * 10, pad=10))
             csum += i * digit
         end
         cdigit = 11 - mod1(csum, 11)
-        checknum = if check == 'X' 10 else parsefor(ISBN, UInt8, check) end
+        checknum = if check == 'X' 0x0a else parsefor(ISBN, UInt8, check) end
+        checknum isa UInt8 || return checknum
         if cdigit != checknum
-            throw(ChecksumViolation{ISBN}(code, checknum, cdigit))
+            return ChecksumViolation{ISBN}(code, checknum, cdigit)
         end
         eansum = 0
         for (i, dig) in enumerate(digits(dcode, pad=12))
@@ -865,7 +892,7 @@ function ISBN(code::AbstractString)
         eancheck = (10 - eansum % 10) % 10
         ISBN(EAN13(dcode, eancheck, 0x1000 | UInt8(cdigit)))
     else
-        throw(MalformedIdentifier{ISBN}(code, "must be a 10 or 13-digit integer"))
+        return MalformedIdentifier{ISBN}(code, "must be a 10 or 13-digit integer")
     end
 end
 
@@ -875,7 +902,7 @@ shortcode(isbn::ISBN) = string(isbn)
 
 function Base.convert(::Type{ISBN}, ean::EAN13)
     if idcode(ean) ÷ 10^9 ∉ (978, 979)
-        throw(MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979"))
+        return MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979")
     end
     ISBN(ean)
 end
@@ -971,25 +998,29 @@ exception.
 # Examples
 
 ```julia
-julia> Wikidata("Q42")
+julia> parse(Wikidata, "Q42")
 Wikidata:Q42
 
-julia> print(Wikidata("Q42"))
+julia> print(parse(Wikidata, "Q42"))
 Q42
 """
 struct Wikidata <: AcademicIdentifier
     id::UInt64
 end
 
-function Wikidata(id::AbstractString)
+function parseid(::Type{Wikidata}, id::AbstractString)
     if startswith(id, 'Q')
-        Wikidata(parsefor(Wikidata, UInt64, id[2:end]))
+        wint = parsefor(Wikidata, UInt64, id[2:end])
+        wint isa UInt64 || return wint
+        Wikidata(wint)
     else
-        throw(MalformedIdentifier{Wikidata}(id, "must start with 'Q'"))
+        MalformedIdentifier{Wikidata}(id, "must start with 'Q'")
     end
 end
 
 shortcode(wd::Wikidata) = string('Q', wd.id)
 purlprefix(::Type{Wikidata}) = "https://www.wikidata.org/wiki/"
+
+Base.show(io::IO, wd::Wikidata) = (show(io, Wikidata); print(io, '(', wd.id, ')'))
 
 end

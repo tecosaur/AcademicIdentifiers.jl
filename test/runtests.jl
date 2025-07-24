@@ -12,8 +12,8 @@ using Test
             "9912.12345"      # 2099, future format
         ]
         for arxiv in valid_new_arxivs
-            @test ArXiv(arxiv) isa ArXiv
-            @test shortcode(ArXiv(arxiv)) == arxiv
+            @test parse(ArXiv, arxiv) isa ArXiv
+            @test shortcode(parse(ArXiv, arxiv)) == arxiv
         end
     end
 
@@ -26,8 +26,8 @@ using Test
             "q-bio.BM/0501001"    # 2005, q-bio with subclass
         ]
         for arxiv in valid_old_arxivs
-            @test ArXiv(arxiv) isa ArXiv
-            @test shortcode(ArXiv(arxiv)) == arxiv
+            @test parse(ArXiv, arxiv) isa ArXiv
+            @test shortcode(parse(ArXiv, arxiv)) == arxiv
         end
     end
 
@@ -39,8 +39,8 @@ using Test
             ("9912.12345v2", "9912.12345v2")
         ]
         for (input, expected) in valid_versioned_arxivs
-            @test ArXiv(input) isa ArXiv
-            @test shortcode(ArXiv(input)) == expected
+            @test parse(ArXiv, input) isa ArXiv
+            @test shortcode(parse(ArXiv, input)) == expected
         end
     end
 
@@ -63,7 +63,7 @@ using Test
             "invalid"            # Completely invalid
         ]
         for bad_arxiv in malformed_arxivs
-            @test_throws MalformedIdentifier{ArXiv} ArXiv(bad_arxiv)
+            @test_throws MalformedIdentifier{ArXiv} parse(ArXiv, bad_arxiv)
         end
     end
 
@@ -81,37 +81,37 @@ using Test
             "astro-ph/０001001"  # full-width zero in old scheme
         ]
         for bad_arxiv in unicode_arxivs
-            @test_throws MalformedIdentifier{ArXiv} ArXiv(bad_arxiv)
+            @test_throws MalformedIdentifier{ArXiv} parse(ArXiv, bad_arxiv)
         end
     end
 
     @testset "Utils" begin
         # Test new scheme
-        arxiv_new = ArXiv("2301.12345")
+        arxiv_new = parse(ArXiv, "2301.12345")
         @test shortcode(arxiv_new) == "2301.12345"
         @test purl(arxiv_new) == "https://arxiv.org/abs/2301.12345"
         @test sprint(print, arxiv_new) == "https://arxiv.org/abs/2301.12345"
 
         # Test old scheme
-        arxiv_old = ArXiv("hep-th/9901001")
+        arxiv_old = parse(ArXiv, "hep-th/9901001")
         @test shortcode(arxiv_old) == "hep-th/9901001"
         @test purl(arxiv_old) == "https://arxiv.org/abs/hep-th/9901001"
         @test sprint(print, arxiv_old) == "https://arxiv.org/abs/hep-th/9901001"
 
         # Test case sensitivity for prefixes
-        @test shortcode(ArXiv("ArXiv:2301.12345")) == "2301.12345"
-        @test shortcode(ArXiv("ARXIV:2301.12345")) == "2301.12345"
-        @test shortcode(ArXiv("arxiv:2301.12345")) == "2301.12345"
-        @test shortcode(ArXiv("ArXiv:hep-th/9901001")) == "hep-th/9901001"
+        @test shortcode(parse(ArXiv, "ArXiv:2301.12345")) == "2301.12345"
+        @test shortcode(parse(ArXiv, "ARXIV:2301.12345")) == "2301.12345"
+        @test shortcode(parse(ArXiv, "arxiv:2301.12345")) == "2301.12345"
+        @test shortcode(parse(ArXiv, "ArXiv:hep-th/9901001")) == "hep-th/9901001"
 
         # Test URL parsing
-        @test shortcode(ArXiv("https://arxiv.org/abs/2301.12345")) == "2301.12345"
-        @test shortcode(ArXiv("https://arxiv.org/abs/hep-th/9901001")) == "hep-th/9901001"
+        @test shortcode(parse(ArXiv, "https://arxiv.org/abs/2301.12345")) == "2301.12345"
+        @test shortcode(parse(ArXiv, "https://arxiv.org/abs/hep-th/9901001")) == "hep-th/9901001"
 
         # Test categories with periods
-        math_arxiv = ArXiv("math.AG/0501001")
+        math_arxiv = parse(ArXiv, "math.AG/0501001")
         @test shortcode(math_arxiv) == "math.AG/0501001"
-        cs_arxiv = ArXiv("cs.AI/0501001")
+        cs_arxiv = parse(ArXiv, "cs.AI/0501001")
         @test shortcode(cs_arxiv) == "cs.AI/0501001"
     end
 end
@@ -125,12 +125,12 @@ end
             "10.1093/nar/gkaa1100"
         ]
         for doi in valid_dois
-            @test shortcode(DOI(doi)) == doi
+            @test shortcode(parse(DOI, doi)) == doi
         end
 
         # Test prefix parsing
-        @test shortcode(DOI("doi:10.1000/182")) == "10.1000/182"
-        @test shortcode(DOI("DOI:10.1038/nature12373")) == "10.1038/nature12373"
+        @test shortcode(parse(DOI, "doi:10.1000/182")) == "10.1000/182"
+        @test shortcode(parse(DOI, "DOI:10.1038/nature12373")) == "10.1038/nature12373"
     end
 
     @testset "Unicode edge cases" begin
@@ -141,7 +141,7 @@ end
         ]
         for bad_doi in unicode_dois
             # DOI constructor is very permissive, so we test that it at least doesn't crash
-            @test DOI(bad_doi) isa DOI
+            @test parse(DOI, bad_doi) isa DOI
         end
 
         # Test cases that are accepted (DOI is permissive with Unicode)
@@ -153,12 +153,12 @@ end
             "１０.1000/182",    # full-width 10
         ]
         for doi_input in accepted_unicode_dois
-            @test DOI(doi_input) isa DOI
+            @test parse(DOI, doi_input) isa DOI
         end
     end
 
     @testset "Utils" begin
-        doi = DOI("10.1000/182")
+        doi = parse(DOI, "10.1000/182")
 
         # Test shortcode
         @test shortcode(doi) == "10.1000/182"
@@ -179,7 +179,7 @@ end
             "9781402894626"
         ]
         for ean in valid_ean13s
-            @test shortcode(EAN13(ean)) == ean
+            @test shortcode(parse(EAN13, ean)) == ean
         end
     end
 
@@ -192,7 +192,7 @@ end
             "97804390234"      # Too few digits
         ]
         for bad_ean in malformed_ean13s
-            @test_throws Union{MalformedIdentifier{EAN13},ChecksumViolation{EAN13}} EAN13(bad_ean)
+            @test_throws Union{MalformedIdentifier{EAN13},ChecksumViolation{EAN13}} parse(EAN13, bad_ean)
         end
     end
 
@@ -214,14 +214,14 @@ end
             end
         end
         for ean in wrong_ean13s
-            @test_throws ChecksumViolation{EAN13} EAN13(ean)
+            @test_throws ChecksumViolation{EAN13} parse(EAN13, ean)
         end
     end
 
     @testset "Integer constructor" begin
         # Test integer constructor with separate code and checksum
         ean13_int = EAN13(978043902348, 1)
-        ean13_str = EAN13("9780439023481")
+        ean13_str = parse(EAN13, "9780439023481")
         @test idcode(ean13_int) == idcode(ean13_str)
         @test idchecksum(ean13_int) == idchecksum(ean13_str)
         @test shortcode(ean13_int) == shortcode(ean13_str)
@@ -232,7 +232,7 @@ end
 
         # Test another integer constructor
         ean13_int2 = EAN13(979888645174, 0)
-        ean13_str2 = EAN13("9798886451740")
+        ean13_str2 = parse(EAN13, "9798886451740")
         @test shortcode(ean13_int2) == shortcode(ean13_str2)
 
         # Test invalid integer inputs
@@ -245,7 +245,7 @@ end
             "9780439023481🔢", # emoji
         ]
         for bad_ean in unicode_ean13s
-            @test_throws MalformedIdentifier{EAN13} EAN13(bad_ean)
+            @test_throws MalformedIdentifier{EAN13} parse(EAN13, bad_ean)
         end
 
         # Test cases with full-width Unicode digits
@@ -256,7 +256,7 @@ end
             "９７８0439023481",  # full-width 978
         ]
         for bad_ean in unicode_ean13s_fullwidth
-            @test_throws MalformedIdentifier{EAN13} EAN13(bad_ean)
+            @test_throws MalformedIdentifier{EAN13} parse(EAN13, bad_ean)
         end
     end
 
@@ -267,7 +267,7 @@ end
             ("9781402894626", 978140289462, 6)
         ]
         for (idstr, code, csum) in ean13_cases
-            ean13 = EAN13(idstr)
+            ean13 = parse(EAN13, idstr)
             @test idcode(ean13) == code
             @test idchecksum(ean13) == csum
             @test shortcode(ean13) == idstr
@@ -284,7 +284,7 @@ end
             "2049-3630"
         ]
         for issn in valid_issns
-            @test shortcode(ISSN(issn)) == issn
+            @test shortcode(parse(ISSN, issn)) == issn
         end
     end
 
@@ -294,13 +294,13 @@ end
             "abcd-efgh"   # Non-numeric
         ]
         for bad_issn in malformed_issns
-            @test_throws MalformedIdentifier{ISSN} ISSN(bad_issn)
+            @test_throws MalformedIdentifier{ISSN} parse(ISSN, bad_issn)
         end
 
         # These throw different types of exceptions
-        @test_throws ArgumentError ISSN("")  # Empty string
-        @test_throws ChecksumViolation{ISSN} ISSN("031-8471")    # Too few digits
-        @test_throws ChecksumViolation{ISSN} ISSN("0317-847")     # Missing check digit
+        @test_throws ArgumentError parse(ISSN, "")  # Empty string
+        @test_throws ChecksumViolation{ISSN} parse(ISSN, "031-8471")    # Too few digits
+        @test_throws ChecksumViolation{ISSN} parse(ISSN, "0317-847")     # Missing check digit
     end
 
     @testset "Checksum" begin
@@ -321,21 +321,21 @@ end
             end
         end
         for issn in wrong_issns
-            @test_throws ChecksumViolation{ISSN} ISSN(issn)
+            @test_throws ChecksumViolation{ISSN} parse(ISSN, issn)
         end
     end
 
     @testset "Integer constructor" begin
         # Test integer constructor with correct checksum
         issn_int = ISSN(317847, 1)
-        issn_str = ISSN("0317-8471")
+        issn_str = parse(ISSN, "0317-8471")
         @test idcode(issn_int) == idcode(issn_str)
         @test idchecksum(issn_int) == idchecksum(issn_str)
         @test shortcode(issn_int) == shortcode(issn_str)
 
         # Test another integer constructor with X checksum
         issn_int_x = ISSN(1050124, 10)
-        issn_str_x = ISSN("1050-124X")
+        issn_str_x = parse(ISSN, "1050-124X")
         @test shortcode(issn_int_x) == shortcode(issn_str_x)
 
         # Test invalid integer inputs
@@ -350,7 +350,7 @@ end
             "0317-8471🔢",   # emoji
         ]
         for bad_issn in unicode_issns
-            @test_throws MalformedIdentifier{ISSN} ISSN(bad_issn)
+            @test_throws MalformedIdentifier{ISSN} parse(ISSN, bad_issn)
         end
 
         # Test cases with full-width Unicode digits
@@ -360,7 +360,7 @@ end
             "0317-８471",    # full-width 8
         ]
         for bad_issn in unicode_issns_fullwidth
-            @test_throws MalformedIdentifier{ISSN} ISSN(bad_issn)
+            @test_throws MalformedIdentifier{ISSN} parse(ISSN, bad_issn)
         end
     end
 
@@ -370,7 +370,7 @@ end
             ("1050-124X", 1050124, 10)
         ]
         for (idstr, code, csum) in issn_cases
-            issn = ISSN(idstr)
+            issn = parse(ISSN, idstr)
             @test idcode(issn) == code
             @test idchecksum(issn) == csum
             @test shortcode(issn) == idstr
@@ -378,9 +378,9 @@ end
         end
 
         # Test case sensitivity
-        @test shortcode(ISSN("ISSN:0317-8471")) == "0317-8471"
-        @test shortcode(ISSN("issn:0317-8471")) == "0317-8471"
-        @test shortcode(ISSN("1050-124x")) == "1050-124X"
+        @test shortcode(parse(ISSN, "ISSN:0317-8471")) == "0317-8471"
+        @test shortcode(parse(ISSN, "issn:0317-8471")) == "0317-8471"
+        @test shortcode(parse(ISSN, "1050-124x")) == "1050-124X"
     end
 end
 
@@ -412,12 +412,12 @@ end
             "978-1-59059-356-1"
         ]
         for isbn in valid_isbns
-            @test string(ISBN(isbn)) == isbn
+            @test shortcode(parse(ISBN, isbn)) == isbn
         end
 
         # Test prefix parsing
-        @test string(ISBN("isbn:978-0-439-02348-1")) == "978-0-439-02348-1"
-        @test string(ISBN("ISBN:0-684-84328-5")) == "0-684-84328-5"
+        @test string(parse(ISBN, "isbn:978-0-439-02348-1")) == "978-0-439-02348-1"
+        @test string(parse(ISBN, "ISBN:0-684-84328-5")) == "0-684-84328-5"
     end
 
     @testset "Malformed" begin
@@ -436,7 +436,7 @@ end
             "12345678901234"
         ]
         for bad_isbn in malformed_isbns
-            @test_throws MalformedIdentifier{ISBN} ISBN(bad_isbn)
+            @test_throws MalformedIdentifier{ISBN} parse(ISBN, bad_isbn)
         end
     end
 
@@ -472,9 +472,9 @@ end
 
         for isbn in wrong_isbns
             if length(replace(isbn, '-' => "")) == 13
-                @test_throws ChecksumViolation{EAN13} ISBN(isbn)
+                @test_throws ChecksumViolation{EAN13} parse(ISBN, isbn)
             else
-                @test_throws ChecksumViolation{ISBN} ISBN(isbn)
+                @test_throws ChecksumViolation{ISBN} parse(ISBN, isbn)
             end
         end
     end
@@ -482,13 +482,13 @@ end
     @testset "Integer constructor" begin
         # Test 13-digit integer constructor
         isbn_int = ISBN(9780439023481)
-        isbn_str = ISBN("978-0-439-02348-1")
+        isbn_str = parse(ISBN, "978-0-439-02348-1")
         @test shortcode(isbn_int) == shortcode(isbn_str)
         @test string(isbn_int) == "978-0-439-02348-1"
 
         # Test another valid 13-digit ISBN
         isbn_int2 = ISBN(9781402894626)
-        isbn_str2 = ISBN("978-1-4028-9462-6")
+        isbn_str2 = parse(ISBN, "978-1-4028-9462-6")
         @test shortcode(isbn_int2) == shortcode(isbn_str2)
 
         # Test invalid integer inputs
@@ -505,7 +505,7 @@ end
             "978−0−439−02348−1",    # minus sign instead of hyphen
         ]
         for bad_isbn in unicode_isbns
-            @test_throws MalformedIdentifier{ISBN} ISBN(bad_isbn)
+            @test_throws MalformedIdentifier{ISBN} parse(ISBN, bad_isbn)
         end
 
         # Test cases with full-width Unicode digits
@@ -516,12 +516,12 @@ end
             "978-0-439-０2348-1",   # full-width 0
         ]
         for bad_isbn in unicode_isbns_fullwidth
-            @test_throws MalformedIdentifier{ISBN} ISBN(bad_isbn)
+            @test_throws MalformedIdentifier{ISBN} parse(ISBN, bad_isbn)
         end
     end
 
     @testset "Utils" begin
-        isbn = ISBN("978-0-439-02348-1")
+        isbn = parse(ISBN, "978-0-439-02348-1")
 
         # Test shortcode
         @test shortcode(isbn) == "978-0-439-02348-1"
@@ -541,25 +541,25 @@ end
 
     @testset "conversions" begin
         # Test ISBN to EAN13 conversion
-        isbn = ISBN("978-0-439-02348-1")
+        isbn = parse(ISBN, "978-0-439-02348-1")
         ean = convert(EAN13, isbn)
         @test shortcode(ean) == "9780439023481"
 
         # Test EAN13 to ISBN conversion (only works if the EAN13 was created from an ISBN)
         isbn_str = "978-0-439-02348-1"
-        isbn_original = ISBN(isbn_str)
+        isbn_original = parse(ISBN, isbn_str)
         ean_from_isbn = convert(EAN13, isbn_original)
         isbn_back = convert(ISBN, ean_from_isbn)
         @test string(isbn_back) == isbn_str
 
         # Test round-trip conversion
-        isbn_original2 = ISBN("978-1-4028-9462-6")
+        isbn_original2 = parse(ISBN, "978-1-4028-9462-6")
         ean_converted = convert(EAN13, isbn_original2)
         isbn_back2 = convert(ISBN, ean_converted)
         @test string(isbn_original2) == string(isbn_back2)
 
         # Test EAN13 to ISBN conversion (979 prefix is valid for ISBN)
-        ean_979 = EAN13("9790123456785")  # starts with 979, valid checksum
+        ean_979 = parse(EAN13, "9790123456785")  # starts with 979, valid checksum
         @test convert(ISBN, ean_979) isa ISBN
     end
 end
@@ -572,7 +572,7 @@ end
             "0000-0001-5109-3700"
         ]
         for orcid in valid_orcids
-            @test shortcode(ORCID(orcid)) == orcid
+            @test shortcode(parse(ORCID, orcid)) == orcid
         end
     end
 
@@ -584,7 +584,7 @@ end
             ""
         ]
         for bad_orcid in malformed_orcids
-            @test_throws Union{MalformedIdentifier{ORCID},ArgumentError} ORCID(bad_orcid)
+            @test_throws Union{MalformedIdentifier{ORCID},ArgumentError} parse(ORCID, bad_orcid)
         end
     end
 
@@ -606,14 +606,14 @@ end
             end
         end
         for orcid in wrong_orcids
-            @test_throws ChecksumViolation{ORCID} ORCID(orcid)
+            @test_throws ChecksumViolation{ORCID} parse(ORCID, orcid)
         end
     end
 
     @testset "Integer constructor" begin
         # Test integer constructor with correct checksum
         orcid_int = ORCID(218250097, 10)  # Fixed: correct ID and checksum X (10)
-        orcid_str = ORCID("0000-0021-8250-097X")
+        orcid_str = parse(ORCID, "0000-0021-8250-097X")
         @test idcode(orcid_int) == idcode(orcid_str)
         @test idchecksum(orcid_int) == idchecksum(orcid_str)
 
@@ -638,7 +638,7 @@ end
             "0000-0002-1825-0097🔢", # emoji
         ]
         for bad_orcid in unicode_orcids
-            @test_throws MalformedIdentifier{ORCID} ORCID(bad_orcid)
+            @test_throws MalformedIdentifier{ORCID} parse(ORCID, bad_orcid)
         end
 
         # Test cases with full-width Unicode digits
@@ -648,7 +648,7 @@ end
             "0000-0002-1825-００97",  # full-width zeros
         ]
         for bad_orcid in unicode_orcids_fullwidth
-            @test_throws MalformedIdentifier{ORCID} ORCID(bad_orcid)
+            @test_throws MalformedIdentifier{ORCID} parse(ORCID, bad_orcid)
         end
     end
 
@@ -658,7 +658,7 @@ end
             ("0000-0002-1694-233X", 21694233, 10)
         ]
         for (idstr, code, csum) in orcid_cases
-            orcid = ORCID(idstr)
+            orcid = parse(ORCID, idstr)
             @test idcode(orcid) == code
             @test idchecksum(orcid) == csum
             @test shortcode(orcid) == idstr
@@ -666,9 +666,9 @@ end
         end
 
         # Test case sensitivity
-        @test shortcode(ORCID("ORCID:0000-0002-1825-0097")) == "0000-0002-1825-0097"
-        @test shortcode(ORCID("orcid:0000-0002-1825-0097")) == "0000-0002-1825-0097"
-        @test shortcode(ORCID("0000-0002-1694-233x")) == "0000-0002-1694-233X"
+        @test shortcode(parse(ORCID, "ORCID:0000-0002-1825-0097")) == "0000-0002-1825-0097"
+        @test shortcode(parse(ORCID, "orcid:0000-0002-1825-0097")) == "0000-0002-1825-0097"
+        @test shortcode(parse(ORCID, "0000-0002-1694-233x")) == "0000-0002-1694-233X"
     end
 end
 
@@ -680,7 +680,7 @@ end
             "00x6h5n95"
         ]
         for ror in valid_rors
-            @test shortcode(ROR(ror)) == ror
+            @test shortcode(parse(ROR, ror)) == ror
         end
     end
 
@@ -692,7 +692,7 @@ end
             ""
         ]
         for bad_ror in malformed_rors
-            @test_throws MalformedIdentifier{ROR} ROR(bad_ror)
+            @test_throws MalformedIdentifier{ROR} parse(ROR, bad_ror)
         end
     end
 
@@ -715,7 +715,7 @@ end
             end
         end
         for ror in wrong_rors
-            @test_throws ChecksumViolation{ROR} ROR(ror)
+            @test_throws ChecksumViolation{ROR} parse(ROR, ror)
         end
     end
 
@@ -729,7 +729,7 @@ end
         # Test another integer constructor
         # Test with a known ROR: 05dxps055
         # First decode 5dxps to get the integer
-        ror_str = ROR("05dxps055")
+        ror_str = parse(ROR, "05dxps055")
         ror_code = idcode(ror_str)
         ror_check = idchecksum(ror_str)
         ror_int2 = ROR(ror_code, ror_check)
@@ -746,7 +746,7 @@ end
             "05dx🔤s055",   # emoji letter
         ]
         for bad_ror in unicode_rors
-            @test_throws MalformedIdentifier{ROR} ROR(bad_ror)
+            @test_throws MalformedIdentifier{ROR} parse(ROR, bad_ror)
         end
 
         # Test cases with full-width Unicode characters
@@ -756,7 +756,7 @@ end
             "05dxps０55",   # full-width zero
         ]
         for bad_ror in unicode_rors_fullwidth
-            @test_throws MalformedIdentifier{ROR} ROR(bad_ror)
+            @test_throws MalformedIdentifier{ROR} parse(ROR, bad_ror)
         end
     end
 
@@ -767,7 +767,7 @@ end
             ("00x6h5n95", 95)
         ]
         for (idstr, csum) in ror_cases
-            ror = ROR(idstr)
+            ror = parse(ROR, idstr)
             @test idcode(ror) isa Integer
             @test idchecksum(ror) == csum
             @test shortcode(ror) == idstr
@@ -775,8 +775,8 @@ end
         end
 
         # Test case sensitivity
-        @test shortcode(ROR("ROR:05dxps055")) == "05dxps055"
-        @test shortcode(ROR("ror:05dxps055")) == "05dxps055"
+        @test shortcode(parse(ROR, "ROR:05dxps055")) == "05dxps055"
+        @test shortcode(parse(ROR, "ror:05dxps055")) == "05dxps055"
     end
 end
 
@@ -788,7 +788,7 @@ end
             "87654321"
         ]
         for pmid in valid_pmids
-            @test shortcode(PMID(pmid)) == pmid
+            @test shortcode(parse(PMID, pmid)) == pmid
         end
     end
 
@@ -799,14 +799,14 @@ end
             ""
         ]
         for bad_pmid in malformed_pmids
-            @test_throws MalformedIdentifier{PMID} PMID(bad_pmid)
+            @test_throws MalformedIdentifier{PMID} parse(PMID, bad_pmid)
         end
     end
 
     @testset "Integer constructor" begin
         # Test integer constructor
         pmid_int = PMID(12345678)
-        pmid_str = PMID("12345678")
+        pmid_str = parse(PMID, "12345678")
         @test shortcode(pmid_int) == shortcode(pmid_str)
         @test idcode(pmid_int) == idcode(pmid_str)
 
@@ -824,7 +824,7 @@ end
             "12345678🔢",  # emoji
         ]
         for bad_pmid in unicode_pmids
-            @test_throws MalformedIdentifier{PMID} PMID(bad_pmid)
+            @test_throws MalformedIdentifier{PMID} parse(PMID, bad_pmid)
         end
 
         # Test cases with full-width Unicode digits
@@ -834,7 +834,7 @@ end
             "1234567８",   # full-width 8
         ]
         for bad_pmid in unicode_pmids_fullwidth
-            @test_throws MalformedIdentifier{PMID} PMID(bad_pmid)
+            @test_throws MalformedIdentifier{PMID} parse(PMID, bad_pmid)
         end
     end
 
@@ -845,15 +845,15 @@ end
             ("87654321", 87654321)
         ]
         for (idstr, code) in pmid_cases
-            pmid = PMID(idstr)
+            pmid = parse(PMID, idstr)
             @test idcode(pmid) == code
             @test shortcode(pmid) == idstr
             @test purl(pmid) == "https://pubmed.ncbi.nlm.nih.gov/$idstr"
         end
 
         # Test case sensitivity
-        @test shortcode(PMID("PMID:12345678")) == "12345678"
-        @test shortcode(PMID("pmid:12345678")) == "12345678"
+        @test shortcode(parse(PMID, "PMID:12345678")) == "12345678"
+        @test shortcode(parse(PMID, "pmid:12345678")) == "12345678"
     end
 end
 
@@ -865,7 +865,7 @@ end
             "PMC87654321"
         ]
         for pmcid in valid_pmcids
-            @test shortcode(PMCID(pmcid)) == pmcid
+            @test shortcode(parse(PMCID, pmcid)) == pmcid
         end
     end
 
@@ -877,14 +877,14 @@ end
             ""
         ]
         for bad_pmcid in malformed_pmcids
-            @test_throws MalformedIdentifier{PMCID} PMCID(bad_pmcid)
+            @test_throws MalformedIdentifier{PMCID} parse(PMCID, bad_pmcid)
         end
     end
 
     @testset "Integer constructor" begin
         # Test integer constructor
         pmcid_int = PMCID(123456)
-        pmcid_str = PMCID("PMC123456")
+        pmcid_str = parse(PMCID, "PMC123456")
         @test idcode(pmcid_int) == idcode(pmcid_str)
         @test shortcode(pmcid_int) == shortcode(pmcid_str)
 
@@ -902,7 +902,7 @@ end
             "PMC123456🔢",   # emoji
         ]
         for bad_pmcid in unicode_pmcids
-            @test_throws MalformedIdentifier{PMCID} PMCID(bad_pmcid)
+            @test_throws MalformedIdentifier{PMCID} parse(PMCID, bad_pmcid)
         end
 
         # Test cases with full-width Unicode characters
@@ -913,7 +913,7 @@ end
             "PMC12345６",    # full-width 6
         ]
         for bad_pmcid in unicode_pmcids_fullwidth
-            @test_throws MalformedIdentifier{PMCID} PMCID(bad_pmcid)
+            @test_throws MalformedIdentifier{PMCID} parse(PMCID, bad_pmcid)
         end
     end
 
@@ -924,15 +924,15 @@ end
             ("PMC87654321", 87654321)
         ]
         for (idstr, code) in pmcid_cases
-            pmcid = PMCID(idstr)
+            pmcid = parse(PMCID, idstr)
             @test idcode(pmcid) == code
             @test shortcode(pmcid) == idstr
             @test purl(pmcid) == "https://www.ncbi.nlm.nih.gov/pmc/articles/$idstr"
         end
 
         # Test case sensitivity
-        @test shortcode(PMCID("PMC123456")) == "PMC123456"
-        @test shortcode(PMCID("pmc123456")) == "PMC123456"
+        @test shortcode(parse(PMCID, "PMC123456")) == "PMC123456"
+        @test shortcode(parse(PMCID, "pmc123456")) == "PMC123456"
     end
 end
 
@@ -944,7 +944,7 @@ end
             "Q999999999"
         ]
         for wd in valid_wikidatas
-            @test shortcode(Wikidata(wd)) == wd
+            @test shortcode(parse(Wikidata, wd)) == wd
         end
     end
 
@@ -958,7 +958,7 @@ end
             "q42"       # Lowercase (if not handled)
         ]
         for bad_wd in malformed_wikidatas
-            @test_throws MalformedIdentifier{Wikidata} Wikidata(bad_wd)
+            @test_throws MalformedIdentifier{Wikidata} parse(Wikidata, bad_wd)
         end
     end
 
@@ -967,7 +967,7 @@ end
             "Q42🔢",     # emoji
         ]
         for bad_wd in unicode_wikidatas
-            @test_throws MalformedIdentifier{Wikidata} Wikidata(bad_wd)
+            @test_throws MalformedIdentifier{Wikidata} parse(Wikidata, bad_wd)
         end
 
         # Test cases with full-width Unicode characters
@@ -978,7 +978,7 @@ end
             "Q１23456",  # full-width 1
         ]
         for bad_wd in unicode_wikidatas_fullwidth
-            @test_throws MalformedIdentifier{Wikidata} Wikidata(bad_wd)
+            @test_throws MalformedIdentifier{Wikidata} parse(Wikidata, bad_wd)
         end
     end
 
@@ -989,7 +989,7 @@ end
             "Q999999999"
         ]
         for idstr in wikidata_cases
-            wikidata = Wikidata(idstr)
+            wikidata = parse(Wikidata, idstr)
             @test shortcode(wikidata) == idstr
             @test purl(wikidata) == "https://www.wikidata.org/wiki/$idstr"
             @test sprint(print, wikidata) == "https://www.wikidata.org/wiki/$idstr"
@@ -1000,7 +1000,7 @@ end
 @testset "Error messages" begin
     # Test MalformedIdentifier error formatting
     try
-        ISBN("invalid")
+        parse(ISBN, "invalid")
     catch e
         @test e isa MalformedIdentifier{ISBN}
         error_msg = sprint(showerror, e)
@@ -1010,7 +1010,7 @@ end
 
     # Test ChecksumViolation error formatting
     try
-        ISBN("978-0-439-02348-2")  # Wrong checksum
+        parse(ISBN, "978-0-439-02348-2")  # Wrong checksum
     catch e
         @test e isa ChecksumViolation
         error_msg = sprint(showerror, e)
