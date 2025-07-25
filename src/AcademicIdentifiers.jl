@@ -434,19 +434,20 @@ function parseid(::Type{DOI}, doi::AbstractString)
         startswith(ldoi, prefix) &&
             return parseid(DOI, @view doi[ncodeunits(prefix)+1:end])
     end
-    if '/' in doi
-        registrant, object = split(doi, '/', limit=2)
-        DOI(String(registrant), String(object))
+    registrant, object = if '/' in doi
+        split(doi, '/', limit=2)
     else
-        DOI(String(doi), "")
+        doi, ""
     end
+    '.' in registrant && all(c -> c == '.' || c ∈ '0':'9', registrant) ||
+        return MalformedIdentifier{DOI}(doi, "registrant must be a string of digits and periods")
+    DOI(String(registrant), String(object))
 end
 
 purlprefix(::Type{DOI}) = "https://doi.org/"
 shortcode(doi::DOI) = doi.registrant * '/' * doi.object
 
 Base.print(io::IO, doi::DOI) = print(io, "doi:", shortcode(doi))
-
 Base.show(io::IO, doi::DOI) = (show(io, DOI); show(io, (doi.registrant, doi.object)))
 
 
