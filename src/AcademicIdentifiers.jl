@@ -399,6 +399,8 @@ end
 
 purlprefix(::Type{ArXiv}) = "https://arxiv.org/abs/"
 
+Base.print(io::IO, arxiv::ArXiv) = print(io, "arXiv:", shortcode(arxiv))
+
 
 # DOI
 
