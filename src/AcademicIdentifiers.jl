@@ -221,10 +221,13 @@ function Base.show(io::IO, ::MIME"text/plain", id::AcademicIdentifier)
     if endswith(label, "ID")
         idstr = chopprefix(idstr, chopsuffix(label, "ID"))
     end
+    if get(io, :typeinfo, Nothing) != typeof(id)
+        print(io, S"{bold:$label:}")
+    end
     if isnothing(url)
-        print(io, S"{bold:$label:}$idstr")
+        print(io, S"$idstr")
     else
-        print(io, S"{bold:$label:}{link=$url:$idstr}")
+        print(io, S"{link=$url:$idstr}")
     end
 end
 
