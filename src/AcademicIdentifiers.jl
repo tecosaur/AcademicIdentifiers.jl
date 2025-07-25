@@ -5,7 +5,7 @@ module AcademicIdentifiers
 
 using StyledStrings: @styled_str as @S_str
 
-export AcademicIdentifier, ArXiv, DOI, EAN13, ISSN, ISBN, ORCID, ROR, PMID, PMCID, Wikidata
+export AcademicIdentifier, ArXiv, DOI, EAN13, ISSN, ISBN, ORCID, OpenAlexID, ROR, PMID, PMCID, Wikidata
 export shortcode, purl
 
 include("isbn-hyphenation.jl")
@@ -522,6 +522,70 @@ function shortcode(orcid::ORCID)
 end
 
 purlprefix(::Type{ORCID}) = "https://orcid.org/"
+
+
+# OpenAlex
+
+"""
+    OpenAlexID{kind} <: AcademicIdentifier
+
+An OpenAlex identifier is a primary key for resources in the OpenAlex database.
+
+It consists of a category prefix (a single letter) followed by positive integer.
+
+Invalid OpenAlex identifiers will throw a `MalformedIdentifier` exception.
+
+# Examples
+
+```julia
+julia> parse(OpenAlexID{:W}, "W2741809807")
+
+julia> parse(OpenAlexID, "A5092938886")
+OpenAlexID:A2741809807
+
+julia> purl(parse(OpenAlexID, "W2741809807"))
+"https://openalex.org/W2741809807"
+```
+"""
+struct OpenAlexID{kind} <: AcademicIdentifier
+    num::Int
+end
+
+function parseid(::Type{OpenAlexID{kind}}, id::AbstractString) where {kind}
+    if startswith(id, "https://openalex.org/")
+        prefixend = findnext('/', id, ncodeunits("https://openalex.org/")+1)
+        parseid(OpenAlexID{kind}, @view id[something(prefixend, ncodeunits("https://openalex.org/"))+1:end])
+    elseif startswith(lowercase(id), "openalex:")
+        parseid(OpenAlexID{kind}, @view id[ncodeunits("openalex:")+1:end])
+    else
+        isempty(id) && return MalformedIdentifier{OpenAlexID{kind}}(id, "cannot be empty")
+        uppercase(first(id)) == first(String(kind)) ||
+            return MalformedIdentifier{OpenAlexID{kind}}(id, "kind does not match")
+        OpenAlexID{kind}(parsefor(OpenAlexID, Int, @view id[2:end]))
+    end
+end
+
+function parseid(::Type{OpenAlexID}, id::AbstractString)
+    if startswith(id, "https://openalex.org/")
+        prefixend = findnext('/', id, ncodeunits("https://openalex.org/")+1)
+        parseid(OpenAlexID, @view id[something(prefixend, ncodeunits("https://openalex.org/"))+1:end])
+    elseif startswith(lowercase(id), "openalex:")
+        parseid(OpenAlexID, @view id[ncodeunits("openalex:")+1:end])
+    else
+        isempty(id) && return MalformedIdentifier{OpenAlexID}(id, "cannot be empty")
+        kindchar = uppercase(first(id))
+        kindchar ∈ ('W', 'A', 'S', 'I', 'C', 'P', 'F') ||
+            return MalformedIdentifier{OpenAlexID}(id, "unrecognised kind prefix")
+        num = parsefor(OpenAlexID, Int, @view id[2:end])
+        OpenAlexID{Symbol(kindchar)}(num)
+    end
+end
+
+shortcode(id::OpenAlexID{kind}) where {kind} = string(kind, id.num)
+purlprefix(@nospecialize(::OpenAlexID)) = "https://openalex.org/"
+
+Base.show(io::IO, id::OpenAlexID) = (show(io, typeof(id)); print(io, '(', id.num, ')'))
+Base.print(io::IO, id::OpenAlexID) = print(io, shortcode(id))
 
 
 # ROR
