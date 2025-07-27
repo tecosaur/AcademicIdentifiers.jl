@@ -348,6 +348,115 @@ end
     end
 end
 
+@testset "ISNI" begin
+    @testset "Valid" begin
+        valid_isnis = [
+            "0000 0001 2281 955X",
+            "0000 0000 8389 1195",
+            "0000 0004 0600 5291"
+        ]
+        for isni in valid_isnis
+            @test parse(ISNI, isni) isa ISNI
+            @test shortcode(parse(ISNI, isni)) == isni
+        end
+    end
+
+    @testset "Malformed" begin
+        malformed_isnis = [
+            "",                    # Empty string
+            "abcd efgh ijkl mnop", # Non-numeric
+            "0000 0001 2281 95",  # Too short
+            "0000 0001 2281 955XX", # Too long
+            "0000 0001 2281 955Y"   # Invalid check digit
+        ]
+        for bad_isni in malformed_isnis
+            @test_throws Union{MalformedIdentifier{ISNI},ChecksumViolation{ISNI}} parse(ISNI, bad_isni)
+        end
+    end
+
+    @testset "Checksum" begin
+        valid_isnis = [
+            "0000 0001 2281 955X",
+            "0000 0000 8389 1195",
+            "0000 0004 0600 5291"
+        ]
+
+        wrong_isnis = String[]
+        for isni in valid_isnis
+            isni_stem = isni[1:end-1]
+            correct_check = isni[end]
+            for check_char in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'X']
+                if check_char != correct_check
+                    push!(wrong_isnis, isni_stem * check_char)
+                end
+            end
+        end
+        for isni in wrong_isnis
+            @test_throws ChecksumViolation{ISNI} parse(ISNI, isni)
+        end
+    end
+
+    @testset "Integer constructor" begin
+        # Test integer constructor with correct checksum
+        isni_int = ISNI(12281955, 10)  # X = 10
+        isni_str = parse(ISNI, "0000 0001 2281 955X")
+        @test AcademicIdentifiers.idcode(isni_int) == AcademicIdentifiers.idcode(isni_str)
+        @test AcademicIdentifiers.idchecksum(isni_int) == AcademicIdentifiers.idchecksum(isni_str)
+        @test shortcode(isni_int) == shortcode(isni_str)
+
+        # Test invalid integer inputs
+        @test_throws MalformedIdentifier{ISNI} ISNI(12345678901234567, 1)  # Too many digits
+        @test_throws ChecksumViolation{ISNI} ISNI(12281955, 2)  # Wrong checksum
+    end
+
+    @testset "Unicode edge cases" begin
+        unicode_isnis = [
+            "0000 0001 2281 955X🔢", # emoji
+            "０000 0001 2281 955X",   # full-width zero
+            "0000 ０001 2281 955X",   # full-width zero
+        ]
+        for bad_isni in unicode_isnis
+            @test_throws MalformedIdentifier{ISNI} parse(ISNI, bad_isni)
+        end
+    end
+
+    @testset "Utils" begin
+        isni_cases = [
+            ("0000 0001 2281 955X", 12281955, 10),
+            ("0000 0000 8389 1195", 8389119, 5),
+            ("0000 0004 0600 5291", 40600529, 1)
+        ]
+        for (idstr, code, csum) in isni_cases
+            isni = parse(ISNI, idstr)
+            @test AcademicIdentifiers.idcode(isni) == code
+            @test AcademicIdentifiers.idchecksum(isni) == csum
+            @test shortcode(isni) == idstr
+            expected_purl = "https://isni.org/isni/" * replace(idstr, " " => "")
+            @test purl(isni) == expected_purl
+            @test sprint(print, isni) == expected_purl
+        end
+
+        # Test prefix parsing
+        @test shortcode(parse(ISNI, "isni:0000 0001 2281 955X")) == "0000 0001 2281 955X"
+        @test shortcode(parse(ISNI, "https://isni.org/isni/000000012281955X")) == "0000 0001 2281 955X"
+
+        # Test tryparse
+        @test tryparse(ISNI, "0000 0001 2281 955X") isa ISNI
+        @test tryparse(ISNI, "invalid") === nothing
+        @test tryparse(ISNI, "") === nothing
+
+        # Test eval(show(x)) == x
+        isni_examples = [
+            parse(ISNI, "0000 0001 2281 955X"),
+            parse(ISNI, "0000 0000 8389 1195"),
+            parse(ISNI, "0000 0004 0600 5291")
+        ]
+        for isni in isni_examples
+            @test eval(Meta.parse(repr(isni))) == isni
+        end
+    end
+end
+
 @testset "ISSN" begin
     @testset "Valid" begin
         valid_issns = [
@@ -370,7 +479,7 @@ end
         end
 
         # These throw different types of exceptions
-        @test_throws ArgumentError parse(ISSN, "")  # Empty string
+        @test_throws MalformedIdentifier{ISSN} parse(ISSN, "")  # Empty string
         @test_throws ChecksumViolation{ISSN} parse(ISSN, "031-8471")    # Too few digits
         @test_throws ChecksumViolation{ISSN} parse(ISSN, "0317-847")     # Missing check digit
     end
@@ -666,6 +775,89 @@ end
     end
 end
 
+@testset "OCN" begin
+    @testset "Valid" begin
+        valid_ocns = [
+            "1234567",
+            "12345678",
+            "123456789",
+            "1234567890",
+            "ocn1234567",
+            "oclc:12345678",
+            "ocm1234567",
+            "on123456789",
+            "(ocolc)12345678"
+        ]
+        for ocn in valid_ocns
+            @test parse(OCN, ocn) isa OCN
+        end
+    end
+
+    @testset "Malformed" begin
+        malformed_ocns = [
+            "",              # Empty string
+            "abc123",        # Non-numeric characters
+            "123abc",        # Mixed alphanumeric
+            "12.345",        # Decimal point
+            "12 345",        # Space in number
+            "ocn",           # Prefix without number
+            "oclc:",         # Prefix without number
+            "123-456"        # Hyphen
+        ]
+        for bad_ocn in malformed_ocns
+            @test_throws MalformedIdentifier{OCN} parse(OCN, bad_ocn)
+        end
+    end
+
+    @testset "Unicode edge cases" begin
+        unicode_ocns = [
+            "123456🔢",      # emoji
+            "１234567",      # full-width 1
+            "1２34567",      # full-width 2
+            "12３4567",      # full-width 3
+        ]
+        for bad_ocn in unicode_ocns
+            @test_throws MalformedIdentifier{OCN} parse(OCN, bad_ocn)
+        end
+    end
+
+    @testset "Utils" begin
+        ocn_cases = [
+            ("1234567", 1234567, "ocm1234567"),      # < 10^8
+            ("12345678", 12345678, "ocm12345678"),   # < 10^8
+            ("123456789", 123456789, "ocn123456789"), # < 10^9
+            ("1234567890", 1234567890, "on1234567890") # >= 10^9
+        ]
+        for (input, code, formatted) in ocn_cases
+            ocn = parse(OCN, input)
+            @test idcode(ocn) == code
+            @test shortcode(ocn) == input
+            @test purl(ocn) == "https://worldcat.org/oclc/$input"
+            @test sprint(print, ocn) == formatted
+        end
+
+        # Test prefix parsing
+        @test shortcode(parse(OCN, "ocn:1234567")) == "1234567"
+        @test shortcode(parse(OCN, "oclc:1234567")) == "1234567"
+        @test shortcode(parse(OCN, "https://worldcat.org/oclc/1234567")) == "1234567"
+
+        # Test tryparse
+        @test tryparse(OCN, "1234567") isa OCN
+        @test tryparse(OCN, "invalid") === nothing
+        @test tryparse(OCN, "") === nothing
+
+        # Test eval(show(x)) == x
+        ocn_examples = [
+            parse(OCN, "1234567"),
+            parse(OCN, "12345678"),
+            parse(OCN, "123456789")
+        ]
+        for ocn in ocn_examples
+            @test eval(Meta.parse(repr(ocn))) == ocn
+        end
+    end
+end
+
 @testset "ORCID" begin
     @testset "Valid" begin
         valid_orcids = [
@@ -786,6 +978,168 @@ end
         ]
         for orcid in orcid_examples
             @test eval(Meta.parse(repr(orcid))) == orcid
+        end
+    end
+end
+
+@testset "OpenAlexID" begin
+    @testset "Valid" begin
+        valid_openalex_ids = [
+            ("W2741809807", :W),    # Work
+            ("A2208157607", :A),    # Author
+            ("S2741809807", :S),    # Source
+            ("I2741809807", :I),    # Institution
+            ("C2741809807", :C),    # Concept
+            ("P2741809807", :P),    # Publisher
+            ("F2741809807", :F)     # Funder
+        ]
+        for (id, kind) in valid_openalex_ids
+            @test parse(OpenAlexID{kind}, id) isa OpenAlexID{kind}
+            @test shortcode(parse(OpenAlexID{kind}, id)) == id
+        end
+
+        # Test generic OpenAlexID parsing
+        for (id, kind) in valid_openalex_ids
+            @test parse(OpenAlexID, id) isa OpenAlexID{kind}
+            @test shortcode(parse(OpenAlexID, id)) == id
+        end
+    end
+
+    @testset "Malformed" begin
+        malformed_openalex_ids = [
+            "",              # Empty string
+            "X2741809807",   # Invalid kind prefix
+            "W",             # No number
+            "W274180980a",   # Non-numeric
+            "2741809807",    # Missing prefix
+            "WW2741809807"   # Double prefix
+        ]
+        for bad_id in malformed_openalex_ids
+            @test_throws MalformedIdentifier parse(OpenAlexID, bad_id)
+        end
+
+        # Test kind mismatch
+        @test_throws MalformedIdentifier{OpenAlexID{:W}} parse(OpenAlexID{:W}, "A2741809807")
+        @test_throws MalformedIdentifier{OpenAlexID{:A}} parse(OpenAlexID{:A}, "W2741809807")
+    end
+
+    @testset "Unicode edge cases" begin
+        unicode_openalex_ids = [
+            "W2741809807🔢", # emoji
+            "Ｗ2741809807",   # full-width W
+            "W２741809807",   # full-width 2
+            "W2７41809807",   # full-width 7
+        ]
+        for bad_id in unicode_openalex_ids
+            @test_throws MalformedIdentifier parse(OpenAlexID, bad_id)
+        end
+    end
+
+    @testset "Utils" begin
+        openalex_cases = [
+            ("W2741809807", :W, 2741809807),
+            ("A2208157607", :A, 2208157607),
+            ("S2741809807", :S, 2741809807)
+        ]
+        for (idstr, kind, num) in openalex_cases
+            openalex_id = parse(OpenAlexID{kind}, idstr)
+            @test shortcode(openalex_id) == idstr
+            @test purl(openalex_id) == "https://openalex.org/$idstr"
+            @test sprint(print, openalex_id) == idstr
+        end
+
+        # Test prefix parsing
+        @test shortcode(parse(OpenAlexID, "openalex:W2741809807")) == "W2741809807"
+        @test shortcode(parse(OpenAlexID, "https://openalex.org/W2741809807")) == "W2741809807"
+
+        # Test tryparse
+        @test tryparse(OpenAlexID, "W2741809807") isa OpenAlexID
+        @test tryparse(OpenAlexID, "invalid") === nothing
+        @test tryparse(OpenAlexID, "") === nothing
+
+        # Test eval(show(x)) == x
+        openalex_examples = [
+            parse(OpenAlexID, "W2741809807"),
+            parse(OpenAlexID, "A2208157607"),
+            parse(OpenAlexID, "S2741809807")
+        ]
+        for openalex in openalex_examples
+            @test eval(Meta.parse(repr(openalex))) == openalex
+        end
+    end
+end
+
+@testset "RAiD" begin
+    @testset "Valid" begin
+        valid_raids = [
+            "10.1000/182",
+            "10.1038/nature12373",
+            "10.1016/j.cell.2020.01.001"
+        ]
+        for raid in valid_raids
+            @test parse(RAiD, raid) isa RAiD
+            @test shortcode(parse(RAiD, raid)) == raid
+        end
+    end
+
+    @testset "Malformed" begin
+        # RAiD uses DOI validation, so invalid DOIs should fail
+        malformed_raids = [
+            "",              # Empty string
+            "invalid",       # Not a DOI format
+            "notadoi"        # Not DOI format
+        ]
+        for bad_raid in malformed_raids
+            @test_throws MalformedIdentifier parse(RAiD, bad_raid)
+        end
+    end
+
+    @testset "Unicode edge cases" begin
+        # RAiD validation inherits from DOI, test some Unicode issues
+        unicode_raids = [
+            "10.1000/182🔢", # emoji
+        ]
+        for bad_raid in unicode_raids
+            raid = parse(RAiD, bad_raid)
+            @test raid isa RAiD  # RAiD/DOI is quite permissive
+        end
+    end
+
+    @testset "Utils" begin
+        raid_cases = [
+            "10.1000/182",
+            "10.1038/nature12373",
+            "10.1016/j.cell.2020.01.001"
+        ]
+        for idstr in raid_cases
+            raid = parse(RAiD, idstr)
+            @test shortcode(raid) == idstr
+            @test purl(raid) == "https://raid.org/$idstr"
+            @test sprint(print, raid) == "https://raid.org/$idstr"
+        end
+
+        # Test prefix parsing
+        @test shortcode(parse(RAiD, "raid:10.1000/182")) == "10.1000/182"
+        @test shortcode(parse(RAiD, "https://raid.org/10.1000/182")) == "10.1000/182"
+
+        # Test DOI conversion
+        raid = parse(RAiD, "10.1000/182")
+        doi = convert(DOI, raid)
+        @test shortcode(doi) == "10.1000/182"
+
+        # Test tryparse
+        @test tryparse(RAiD, "10.1000/182") isa RAiD
+        @test tryparse(RAiD, "invalid") === nothing
+        @test tryparse(RAiD, "") === nothing
+
+        # Test eval(show(x)) == x
+        raid_examples = [
+            parse(RAiD, "10.1000/182"),
+            parse(RAiD, "10.1038/nature12373"),
+            parse(RAiD, "10.1016/j.cell.2020.01.001")
+        ]
+        for raid in raid_examples
+            @test eval(Meta.parse(repr(raid))) == raid
         end
     end
 end
@@ -1098,6 +1452,80 @@ end
         ]
         for pmcid in pmcid_examples
             @test eval(Meta.parse(repr(pmcid))) == pmcid
+        end
+    end
+end
+
+@testset "VIAF" begin
+    @testset "Valid" begin
+        valid_viafs = [
+            "12345678",
+            "87654321",
+            "1234567890"
+        ]
+        for viaf in valid_viafs
+            @test parse(VIAF, viaf) isa VIAF
+            @test shortcode(parse(VIAF, viaf)) == viaf
+        end
+    end
+
+    @testset "Malformed" begin
+        malformed_viafs = [
+            "",              # Empty string
+            "abc123",        # Non-numeric characters
+            "123abc",        # Mixed alphanumeric
+            "12.345",        # Decimal point
+            "12 345",        # Space in number
+            "123-456"        # Hyphen
+        ]
+        for bad_viaf in malformed_viafs
+            @test_throws MalformedIdentifier{VIAF} parse(VIAF, bad_viaf)
+        end
+    end
+
+    @testset "Unicode edge cases" begin
+        unicode_viafs = [
+            "12345678🔢",    # emoji
+            "１2345678",     # full-width 1
+            "1２345678",     # full-width 2
+            "12３45678",     # full-width 3
+        ]
+        for bad_viaf in unicode_viafs
+            @test_throws MalformedIdentifier{VIAF} parse(VIAF, bad_viaf)
+        end
+    end
+
+    @testset "Utils" begin
+        viaf_cases = [
+            "12345678",
+            "87654321",
+            "1234567890"
+        ]
+        for idstr in viaf_cases
+            viaf = parse(VIAF, idstr)
+            @test idcode(viaf) == parse(UInt32, idstr)
+            @test shortcode(viaf) == idstr
+            @test purl(viaf) == "https://viaf.org/viaf/$idstr"
+            @test sprint(print, viaf) == "https://viaf.org/viaf/$idstr"
+        end
+
+        # Test prefix parsing
+        @test shortcode(parse(VIAF, "viaf:12345678")) == "12345678"
+        @test shortcode(parse(VIAF, "https://viaf.org/viaf/12345678")) == "12345678"
+
+        # Test tryparse
+        @test tryparse(VIAF, "12345678") isa VIAF
+        @test tryparse(VIAF, "invalid") === nothing
+        @test tryparse(VIAF, "") === nothing
+
+        # Test eval(show(x)) == x
+        viaf_examples = [
+            parse(VIAF, "12345678"),
+            parse(VIAF, "87654321"),
+            parse(VIAF, "123456789")
+        ]
+        for viaf in viaf_examples
+            @test eval(Meta.parse(repr(viaf))) == viaf
         end
     end
 end

@@ -5,7 +5,7 @@ module AcademicIdentifiers
 
 using StyledStrings: @styled_str as @S_str
 
-export AcademicIdentifier, ArXiv, DOI, ISSN, ISBN, OCN, ORCID, OpenAlexID, ROR, PMID, PMCID, Wikidata
+export AcademicIdentifier, ArXiv, DOI, ISNI, ISSN, ISBN, OCN, ORCID, OpenAlexID, RAiD, ROR, PMID, PMCID, VIAF, Wikidata
 export shortcode, purl
 
 include("isbn-hyphenation.jl")
@@ -578,6 +578,62 @@ function Base.hash(doi::DOI, h::UInt)
 end
 
 
+# OCN
+
+"""
+    OCN <: AcademicIdentifier
+
+An **OCLC control number** (OCN) is the primary key that identifies a
+bibliographic master record in WorldCat, the global union catalogue maintained
+by the Online Computer Library Center (OCLC).
+
+Depending on the number of digits, OCNs may be prefixed with `ocm`, `ocn`, or `on`.
+
+### Examples
+
+```julia-repl
+julia> parse(OCN, "ocm00045678")
+OCN:45678
+
+julia> parse(OCN, "(OCoLC)ocn148290923")
+OCN:148290923
+
+julia> print(parse(OCN, "https://www.worldcat.org/oclc/12345678901"))
+on12345678901
+```
+"""
+struct OCN <: AcademicIdentifier
+    id::UInt64
+end
+
+function parseid(::Type{OCN}, id::SubString)
+    isempty(id) && return MalformedIdentifier{OCN}(id, "cannot be empty")
+    if first(id) == '('
+        _, id = chopprefixes(id, "(ocolc)")
+    end
+    if !isempty(id) && !isdigit(first(id))
+        _, id = chopprefixes(id, "ocn:", "oclc:", "ocolc", "oclc", "ocm", "ocn", "on", "https://", "www.", "worldcat.org/oclc/")
+    end
+    id = lstrip(id)
+    all(isdigit, id) || return MalformedIdentifier{OCN}(id, "must only consist of digits")
+    num = parsefor(OCN, UInt64, id)
+    num isa UInt64 || return num
+    OCN(num)
+end
+
+idcode(ocn::OCN) = ocn.id
+purlprefix(::Type{OCN}) = "https://worldcat.org/oclc/"
+
+function Base.print(io::IO, ocn::OCN)
+    print(io, if ocn.id < 10^8
+              "ocm"
+          elseif ocn.id < 10^9
+              "ocn"
+          else
+              "on"
+          end, ocn.id)
+end
+
 
 # ORCID
 
@@ -732,6 +788,53 @@ Base.show(io::IO, id::OpenAlexID) = (show(io, typeof(id)); print(io, '(', id.num
 Base.print(io::IO, id::OpenAlexID) = print(io, shortcode(id))
 
 
+# RAiD
+
+"""
+    RAiD <: AcademicIdentifier
+
+A Research Activity Identifier (RAiD) is a unique identifier for research activities.
+
+All RAiDs have a corresponding DOI, which can be obtained by converting to a `DOI`.
+
+Standardised in [ISO 23527](https://www.iso.org/standard/75931.html).
+
+# Examples
+
+```julia-repl
+julia> parse(RAiD, "10.25.10.1234/a1b2c")
+RAiD:10.25.10.1234/a1b2c
+
+julia> parse(RAiD, "https://raid.org/10.25.10.1234/a1b2c")
+RAiD:10.25.10.1234/a1b2c
+
+julia> print(parse(RAiD, "10.25.10.1234/a1b2c"))
+https://raid.org/10.25.10.1234/a1b2c
+```
+"""
+struct RAiD <: AcademicIdentifier
+    id::DOI
+end
+
+Base.convert(::Type{DOI}, raid::RAiD) = raid.id
+
+function parseid(::Type{RAiD}, id::SubString)
+    chopped, id = chopprefixes(id, "raid:")
+    if !chopped
+        _, id = chopprefixes(id, "https://", "http://", "raid.org/")
+    end
+    doi = parseid(DOI, id)
+    doi isa DOI || return doi
+    RAiD(doi)
+end
+
+purlprefix(::Type{RAiD}) = "https://raid.org/"
+shortcode(raid::RAiD) = shortcode(raid.id)
+
+Base.:(==)(a::RAiD, b::RAiD) = a.id == b.id
+Base.hash(raid::RAiD, h::UInt) = hash(raid.id, h)
+
+
 # ROR
 
 Base.@assume_effects :foldable function croc32decode(::Type{T}, str::AbstractString) where {T <: Integer}
@@ -868,7 +971,7 @@ which are specifically used by PubMed but are distinct from PMCIDs.
 
 # Examples
 
-```julia
+```julia-repl
 julia> parse(PMCID, "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC012345678")
 PMCID:12345678
 
@@ -904,6 +1007,78 @@ purlprefix(::Type{PMCID}) = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
 
 Base.show(io::IO, pmcid::PMCID) = (show(io, PMCID); print(io, '(', pmcid.id, ')'))
 Base.print(io::IO, pmcid::PMCID) = print(io, "PMC", pmcid.id)
+
+
+# ISNI
+
+"""
+    ISNI <: AcademicIdentifier
+
+An **International Standard Name Identifier** (ISNI, ISO 27729) uniquely
+identifies natural persons and organisations engaged in creative activities.
+
+It is a **16-character string** formed by a 15-digit base number followed by
+a single checksum digit calculated with the ISO 7064 *MOD 11-2* algorithm.
+The check digit can be **0–9** or **`X`** (representing the value 10).
+
+Standardised in [ISO 27729](https://www.iso.org/standard/87177.html)
+
+## Examples
+```julia-repl
+julia> parse(ISNI, "0000 0001 2103 2683")
+ISNI:0000 0001 2103 2683
+
+julia> parse(ISNI, "https://isni.org/isni/0000000121032683")
+ISNI:0000 0001 2103 2683
+```
+"""
+struct ISNI <: AcademicIdentifier
+    code::UInt64
+    function ISNI(id::Union{Int64, UInt64}, checksum::Integer)
+        ndigits(id) <= 15 || throw(MalformedIdentifier{ISNI}(id, "must be a 15-digit integer"))
+        i7064check = iso7064mod11m2checksum(id)
+        i7064check == checksum ||
+            throw(ChecksumViolation{ISNI}(id, checksum, i7064check))
+        code = UInt64(id) + UInt64(checksum) << 60
+        new(code)
+    end
+end
+
+function parseid(::Type{ISNI}, id::SubString)
+    if !digitstart(id)
+        chopped, id = chopprefixes(id, "isni:", "isni ")
+        if !chopped
+            _, id = chopprefixes(id, "https://", "http://", "www.",
+                                 "isni.org/isni/", "isni.org/", "isni",
+                                 "viaf.org/viaf/sourceID/ISNI%7C", "viaf.org/processed/ISNI%7C")
+        end
+    end
+    isnidigits = replace(id, ' ' => "")
+    2 <= length(isnidigits) <= 16 ||
+        return MalformedIdentifier{ISNI}(id, "must be a 2-16 character string")
+    iddigits..., checksum = isnidigits
+    id = parsefor(ISNI, UInt64, iddigits)
+    id isa UInt64 || return id
+    check = if uppercase(checksum) == 'X' 0x0a else parsefor(ISNI, UInt8, checksum) end
+    check isa UInt8 || return check
+    try ISNI(id, check) catch e; e end
+end
+
+idcode(isni::ISNI) = Int(isni.code & 0x003fffffffffffff)
+idchecksum(isni::ISNI) = (isni.code >> 60) % UInt8
+
+function shortcode(isni::ISNI)
+    idstr, check = string(idcode(isni)), idchecksum(isni)
+    join(Iterators.partition(lpad(idstr, 15, '0'), 4), ' ') *
+        if check == 10 "X" else string(check) end
+end
+
+purl(isni::ISNI) = string(
+    "https://isni.org/isni/",
+    '0' ^ (15 - ndigits(idcode(isni))),
+    idcode(isni),
+    if idchecksum(isni) == 10 "X" else
+        string(idchecksum(isni)) end)
 
 
 # ISSN
@@ -1215,6 +1390,50 @@ function isbn_hyphenate(isbn::ISBN)
          end
      end)
 end
+
+
+# VIAF
+
+"""
+    VIAF <: AcademicIdentifier
+
+A **V**irtual **I**nternational **A**uthority **F**ile identifier is a numeric
+key used by libraries to disambiguate persons, corporate bodies, and works.
+
+Invalid inputs throw `MalformedIdentifier{VIAF}`.
+
+# Examples
+
+```julia-repl
+julia> parse(VIAF, "113230702")
+VIAF:113230702
+
+julia> parse(VIAF, "https://viaf.org/viaf/113230702/")
+VIAF:113230702
+
+julia> parse(VIAF, "VIAF:abc")
+ERROR: Malformed identifier: VIAF identifier abc must contain only digits
+```
+"""
+struct VIAF <: AcademicIdentifier
+    id::UInt32
+end
+
+function parseid(::Type{VIAF}, id::AbstractString)
+    chopped, id = chopprefixes(id, "viaf:")
+    if !chopped
+        _, id = chopprefixes(id, "https://", "http://", "viaf.org/viaf/")
+    end
+    all(isdigit, id) ||
+        return MalformedIdentifier{VIAF}(id, "must contain only digits")
+    vid = parsefor(VIAF, UInt32, id)
+    vid isa UInt32 || return vid
+    VIAF(vid)
+end
+
+idcode(viaf::VIAF) = viaf.id
+
+purlprefix(::Type{VIAF}) = "https://viaf.org/viaf/"
 
 
 # Wikidata

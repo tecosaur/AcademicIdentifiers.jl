@@ -60,10 +60,15 @@ forms. Output formatting is strict.
 
 + ~ArXiv~
 + ~DOI~
++ ~ISNI~
 + ~ISSN~
 + ~ISBN~
++ ~OCN~
 + ~ORCID~
++ ~OpenAlexID~
++ ~RAiD~
 + ~ROR~
 + ~PMID~
 + ~PMCID~
++ ~VIAF~
 + ~Wikidata~
