@@ -1,16 +1,37 @@
 #+title: AcademicIdentifiers.jl
 #+author: tecosaur
 
+#+html: <a href="https://tecosaur.net"><img src="https://img.shields.io/badge/%F0%9F%A6%95-tec-27a560.svg"></a>
+#+html: <a href="https://www.tldrlegal.com/license/mozilla-public-license-2-0-mpl-2"><img src="https://img.shields.io/badge/license-MPL%202.0-teal.svg"></a>
+#+html: <a href="https://liberapay.com/tec"><img src="https://shields.io/badge/support%20my%20efforts-f6c915?logo=Liberapay&logoColor=black"></a>
+
 Structured and validated types for common identifiers used in/around academic
 work.
+
+* Why?
+
+It's tempting to just use plain strings or integers to represent identifiers
+representing digital pieces of data. Unfortunately, it's easy to end up in a
+situation where the lack of structure creates an opportunity for a wide range of
+problems:
++ Failing to detect malformed identifiers
++ Fragile code that relies on a single specific formatting
++ Forgetting to include the proper prefix, hyphenation, or other formatting
++ Stylistic differences making equality testing fragile
++ Annoyances when parsing/serialising the identifier
++ Undocumented (and unverified) assumptions that a particular string/number just
+  happens to represent a specific kind of identifier
+
+For all of these reasons it is worth formalising interaction with identifiers.
+=AcademicIdentifiers= provides both a framework for doing so, as well as
+implementations for a collection of common identifiers seen in academic
+contexts.
 
 * Generic framework
 
 An abstract ~AcademicIdentifier~ type is introduced (see the docstring for more
 information), along with the error types ~MalformedIdentifier~ and
 ~ChecksumViolation~.
-
-* API
 
 An ~AcademicIdentifier~ can be constructed from its canonical string
 representation (or variations thereof), and can be returned to a canonical
@@ -19,7 +40,7 @@ in the format =name:shortcode= in the REPL, with a hyperlink to the canonical pa
 the resource if possible.
 
 The underlying integer identifier can be extracted using the ~idcode~ accessor
-function, and similarly the checksum (when applicable) using the ~checksum~
+function, and similarly the checksum (when applicable) using the ~idchecksum~
 accessor function.
 
 #+begin_src julia
@@ -32,11 +53,13 @@ print(id::AcademicIdentifier) -> Nothing (print canonical string form)
 string(id::AcademicIdentifier) -> String (canonical form)
 #+end_src
 
+Parsing is generally permissive, with the intent being to accept all unambiguous
+forms. Output formatting is strict.
+
 * Implemented identifiers
 
 + ~ArXiv~
 + ~DOI~
-+ ~EAN13~
 + ~ISSN~
 + ~ISBN~
 + ~ORCID~

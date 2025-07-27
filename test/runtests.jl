@@ -1,5 +1,6 @@
 using AcademicIdentifiers
 using AcademicIdentifiers: MalformedIdentifier, ChecksumViolation, idcode, idchecksum, shortcode, purl
+using AcademicIdentifiers: EAN13
 using Test
 
 @testset "ArXiv" begin
@@ -90,13 +91,13 @@ using Test
         arxiv_new = parse(ArXiv, "2301.12345")
         @test shortcode(arxiv_new) == "2301.12345"
         @test purl(arxiv_new) == "https://arxiv.org/abs/2301.12345"
-        @test sprint(print, arxiv_new) == "https://arxiv.org/abs/2301.12345"
+        @test sprint(print, arxiv_new) == "arXiv:2301.12345"
 
         # Test old scheme
         arxiv_old = parse(ArXiv, "hep-th/9901001")
         @test shortcode(arxiv_old) == "hep-th/9901001"
         @test purl(arxiv_old) == "https://arxiv.org/abs/hep-th/9901001"
-        @test sprint(print, arxiv_old) == "https://arxiv.org/abs/hep-th/9901001"
+        @test sprint(print, arxiv_old) == "arXiv:hep-th/9901001"
 
         # Test case sensitivity for prefixes
         @test shortcode(parse(ArXiv, "ArXiv:2301.12345")) == "2301.12345"
@@ -113,6 +114,45 @@ using Test
         @test shortcode(math_arxiv) == "math.AG/0501001"
         cs_arxiv = parse(ArXiv, "cs.AI/0501001")
         @test shortcode(cs_arxiv) == "cs.AI/0501001"
+
+        # Test tryparse
+        @test tryparse(ArXiv, "2301.12345") isa ArXiv
+        @test tryparse(ArXiv, "hep-th/9901001") isa ArXiv
+        @test tryparse(ArXiv, "invalid") === nothing
+        @test tryparse(ArXiv, "") === nothing
+
+        # Test eval(show(x)) == x
+        arxiv_examples = [
+            parse(ArXiv, "2301.12345"),
+            parse(ArXiv, "1412.7878v2"),
+            parse(ArXiv, "hep-th/9901001"),
+            parse(ArXiv, "math.CA/0611800v1")
+        ]
+        for arxiv in arxiv_examples
+            @test eval(Meta.parse(repr(arxiv))) == arxiv
+        end
+
+        # Test ArXiv to DOI conversion
+        arxiv_new = parse(ArXiv, "2301.12345")
+        arxiv_versioned = parse(ArXiv, "2301.12345v2")
+        arxiv_old = parse(ArXiv, "hep-th/9901001")
+
+        doi_new = convert(DOI, arxiv_new)
+        @test shortcode(doi_new) == "10.48550/arXiv.2301.12345"
+
+        # Version should be stripped for DOI conversion
+        doi_versioned = convert(DOI, arxiv_versioned)
+        @test shortcode(doi_versioned) == "10.48550/arXiv.2301.12345"
+
+        doi_old = convert(DOI, arxiv_old)
+        @test shortcode(doi_old) == "10.48550/arXiv.hep-th/9901001"
+
+        # Test three-arg show (MIME"text/plain") with reference strings
+        arxiv_simple = parse(ArXiv, "2301.12345")
+        show_output = sprint(show, MIME("text/plain"), arxiv_simple)
+        @test show_output == "ArXiv:2301.12345"
+        vec_show_output = sprint(show, MIME("text/plain"), arxiv_simple, context = :typeinfo => ArXiv)
+        @test vec_show_output == "2301.12345"
     end
 end
 
@@ -153,7 +193,7 @@ end
             "１０.1000/182",    # full-width 10
         ]
         for doi_input in accepted_unicode_dois
-            @test parse(DOI, doi_input) isa DOI
+            @test_throws MalformedIdentifier{DOI} parse(DOI, doi_input)
         end
     end
 
@@ -168,6 +208,22 @@ end
 
         # Test output formatting
         @test sprint(print, doi) == "doi:10.1000/182"
+
+        # Test tryparse
+        @test tryparse(DOI, "10.1000/182") isa DOI
+        @test tryparse(DOI, "doi:10.1038/nature12373") isa DOI
+        @test tryparse(DOI, "invalid") === nothing
+        @test tryparse(DOI, "") === nothing
+
+        # Test eval(show(x)) == x
+        doi_examples = [
+            parse(DOI, "10.1000/182"),
+            parse(DOI, "10.1038/nature12373"),
+            parse(DOI, "doi:10.1016/j.cell.2020.01.001")
+        ]
+        for doi in doi_examples
+            @test eval(Meta.parse(repr(doi))) == doi
+        end
     end
 end
 
@@ -272,6 +328,22 @@ end
             @test idchecksum(ean13) == csum
             @test shortcode(ean13) == idstr
             @test purl(ean13) === nothing  # EAN13 doesn't have a standard purl
+            @test sprint(print, ean13) == idstr
+        end
+
+        # Test tryparse
+        @test tryparse(EAN13, "9780439023481") isa EAN13
+        @test tryparse(EAN13, "invalid") === nothing
+        @test tryparse(EAN13, "") === nothing
+
+        # Test eval(show(x)) == x
+        ean13_examples = [
+            parse(EAN13, "9780439023481"),
+            parse(EAN13, "9798886451740"),
+            parse(EAN13, "9781402894626")
+        ]
+        for ean13 in ean13_examples
+            @test eval(Meta.parse(repr(ean13))) == ean13
         end
     end
 end
@@ -375,12 +447,27 @@ end
             @test idchecksum(issn) == csum
             @test shortcode(issn) == idstr
             @test purl(issn) == "https://portal.issn.org/resource/ISSN/$idstr"
+            @test sprint(print, issn) == "ISSN $idstr"
         end
 
         # Test case sensitivity
         @test shortcode(parse(ISSN, "ISSN:0317-8471")) == "0317-8471"
         @test shortcode(parse(ISSN, "issn:0317-8471")) == "0317-8471"
         @test shortcode(parse(ISSN, "1050-124x")) == "1050-124X"
+
+        # Test tryparse
+        @test tryparse(ISSN, "0317-8471") isa ISSN
+        @test tryparse(ISSN, "invalid") === nothing
+        @test tryparse(ISSN, "") === nothing
+
+        # Test eval(show(x)) == x
+        issn_examples = [
+            parse(ISSN, "0317-8471"),
+            parse(ISSN, "1050-124X")
+        ]
+        for issn in issn_examples
+            @test eval(Meta.parse(repr(issn))) == issn
+        end
     end
 end
 
@@ -412,12 +499,12 @@ end
             "978-1-59059-356-1"
         ]
         for isbn in valid_isbns
-            @test shortcode(parse(ISBN, isbn)) == isbn
+            @test shortcode(parse(ISBN, isbn)) == "ISBN " * isbn
         end
 
         # Test prefix parsing
-        @test string(parse(ISBN, "isbn:978-0-439-02348-1")) == "978-0-439-02348-1"
-        @test string(parse(ISBN, "ISBN:0-684-84328-5")) == "0-684-84328-5"
+        @test string(parse(ISBN, "isbn:978-0-439-02348-1")) == "ISBN 978-0-439-02348-1"
+        @test string(parse(ISBN, "ISBN:0-684-84328-5")) == "ISBN 0-684-84328-5"
     end
 
     @testset "Malformed" begin
@@ -484,7 +571,7 @@ end
         isbn_int = ISBN(9780439023481)
         isbn_str = parse(ISBN, "978-0-439-02348-1")
         @test shortcode(isbn_int) == shortcode(isbn_str)
-        @test string(isbn_int) == "978-0-439-02348-1"
+        @test string(isbn_int) == "ISBN 978-0-439-02348-1"
 
         # Test another valid 13-digit ISBN
         isbn_int2 = ISBN(9781402894626)
@@ -524,19 +611,34 @@ end
         isbn = parse(ISBN, "978-0-439-02348-1")
 
         # Test shortcode
-        @test shortcode(isbn) == "978-0-439-02348-1"
+        @test shortcode(isbn) == "ISBN 978-0-439-02348-1"
 
         # Test purl (ISBN doesn't have a standard purl)
         @test purl(isbn) === nothing
 
         # Test output formatting
-        @test sprint(print, isbn) == "978-0-439-02348-1"
-        @test string(isbn) == "978-0-439-02348-1"
+        @test sprint(print, isbn) == "ISBN 978-0-439-02348-1"
+        @test string(isbn) == "ISBN 978-0-439-02348-1"
 
         # Test EAN13 conversion
         ean = convert(EAN13, isbn)
         @test idcode(ean) == 978043902348
         @test idchecksum(ean) == 1
+
+        # Test tryparse
+        @test tryparse(ISBN, "978-0-439-02348-1") isa ISBN
+        @test tryparse(ISBN, "invalid") === nothing
+        @test tryparse(ISBN, "") === nothing
+
+        # Test eval(show(x)) == x
+        isbn_examples = [
+            parse(ISBN, "978-0-439-02348-1"),
+            parse(ISBN, "0-684-84328-5"),
+            parse(ISBN, "ISBN 978-1-4028-9462-6")
+        ]
+        for isbn_ex in isbn_examples
+            @test eval(Meta.parse(repr(isbn_ex))) == isbn_ex
+        end
     end
 
     @testset "conversions" begin
@@ -550,7 +652,7 @@ end
         isbn_original = parse(ISBN, isbn_str)
         ean_from_isbn = convert(EAN13, isbn_original)
         isbn_back = convert(ISBN, ean_from_isbn)
-        @test string(isbn_back) == isbn_str
+        @test string(isbn_back) == "ISBN " * isbn_str
 
         # Test round-trip conversion
         isbn_original2 = parse(ISBN, "978-1-4028-9462-6")
@@ -663,12 +765,28 @@ end
             @test idchecksum(orcid) == csum
             @test shortcode(orcid) == idstr
             @test purl(orcid) == "https://orcid.org/$idstr"
+            @test sprint(print, orcid) == "ORCID:$idstr"
         end
 
         # Test case sensitivity
         @test shortcode(parse(ORCID, "ORCID:0000-0002-1825-0097")) == "0000-0002-1825-0097"
         @test shortcode(parse(ORCID, "orcid:0000-0002-1825-0097")) == "0000-0002-1825-0097"
         @test shortcode(parse(ORCID, "0000-0002-1694-233x")) == "0000-0002-1694-233X"
+
+        # Test tryparse
+        @test tryparse(ORCID, "0000-0002-1825-0097") isa ORCID
+        @test tryparse(ORCID, "invalid") === nothing
+        @test tryparse(ORCID, "") === nothing
+
+        # Test eval(show(x)) == x
+        orcid_examples = [
+            parse(ORCID, "0000-0002-1825-0097"),
+            parse(ORCID, "0000-0002-1694-233X"),
+            parse(ORCID, "0000-0003-1419-2405")
+        ]
+        for orcid in orcid_examples
+            @test eval(Meta.parse(repr(orcid))) == orcid
+        end
     end
 end
 
@@ -772,11 +890,27 @@ end
             @test idchecksum(ror) == csum
             @test shortcode(ror) == idstr
             @test purl(ror) == "https://ror.org/$idstr"
+            @test sprint(print, ror) == "https://ror.org/$idstr"
         end
 
         # Test case sensitivity
         @test shortcode(parse(ROR, "ROR:05dxps055")) == "05dxps055"
         @test shortcode(parse(ROR, "ror:05dxps055")) == "05dxps055"
+
+        # Test tryparse
+        @test tryparse(ROR, "05dxps055") isa ROR
+        @test tryparse(ROR, "invalid") === nothing
+        @test tryparse(ROR, "") === nothing
+
+        # Test eval(show(x)) == x
+        ror_examples = [
+            parse(ROR, "05dxps055"),
+            parse(ROR, "02jx3x895"),
+            parse(ROR, "00x6h5n95")
+        ]
+        for ror in ror_examples
+            @test eval(Meta.parse(repr(ror))) == ror
+        end
     end
 end
 
@@ -849,11 +983,27 @@ end
             @test idcode(pmid) == code
             @test shortcode(pmid) == idstr
             @test purl(pmid) == "https://pubmed.ncbi.nlm.nih.gov/$idstr"
+            @test sprint(print, pmid) == "PMID:$idstr"
         end
 
         # Test case sensitivity
         @test shortcode(parse(PMID, "PMID:12345678")) == "12345678"
         @test shortcode(parse(PMID, "pmid:12345678")) == "12345678"
+
+        # Test tryparse
+        @test tryparse(PMID, "12345678") isa PMID
+        @test tryparse(PMID, "invalid") === nothing
+        @test tryparse(PMID, "") === nothing
+
+        # Test eval(show(x)) == x
+        pmid_examples = [
+            parse(PMID, "12345678"),
+            parse(PMID, "1234567"),
+            parse(PMID, "87654321")
+        ]
+        for pmid in pmid_examples
+            @test eval(Meta.parse(repr(pmid))) == pmid
+        end
     end
 end
 
@@ -928,11 +1078,27 @@ end
             @test idcode(pmcid) == code
             @test shortcode(pmcid) == idstr
             @test purl(pmcid) == "https://www.ncbi.nlm.nih.gov/pmc/articles/$idstr"
+            @test sprint(print, pmcid) == idstr
         end
 
         # Test case sensitivity
         @test shortcode(parse(PMCID, "PMC123456")) == "PMC123456"
         @test shortcode(parse(PMCID, "pmc123456")) == "PMC123456"
+
+        # Test tryparse
+        @test tryparse(PMCID, "PMC123456") isa PMCID
+        @test tryparse(PMCID, "invalid") === nothing
+        @test tryparse(PMCID, "") === nothing
+
+        # Test eval(show(x)) == x
+        pmcid_examples = [
+            parse(PMCID, "PMC123456"),
+            parse(PMCID, "PMC1234567"),
+            parse(PMCID, "PMC87654321")
+        ]
+        for pmcid in pmcid_examples
+            @test eval(Meta.parse(repr(pmcid))) == pmcid
+        end
     end
 end
 
@@ -993,6 +1159,21 @@ end
             @test shortcode(wikidata) == idstr
             @test purl(wikidata) == "https://www.wikidata.org/wiki/$idstr"
             @test sprint(print, wikidata) == "https://www.wikidata.org/wiki/$idstr"
+        end
+
+        # Test tryparse
+        @test tryparse(Wikidata, "Q42") isa Wikidata
+        @test tryparse(Wikidata, "invalid") === nothing
+        @test tryparse(Wikidata, "") === nothing
+
+        # Test eval(show(x)) == x
+        wikidata_examples = [
+            parse(Wikidata, "Q42"),
+            parse(Wikidata, "Q123456"),
+            parse(Wikidata, "Q999999999")
+        ]
+        for wikidata in wikidata_examples
+            @test eval(Meta.parse(repr(wikidata))) == wikidata
         end
     end
 end
