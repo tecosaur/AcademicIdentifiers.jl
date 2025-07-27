@@ -1,6 +1,9 @@
 using AcademicIdentifiers
 using AcademicIdentifiers: MalformedIdentifier, ChecksumViolation, idcode, idchecksum, shortcode, purl
 using AcademicIdentifiers: EAN13
+
+using JSON, JSON3
+
 using Test
 
 @testset "ArXiv" begin
@@ -1625,5 +1628,77 @@ end
         error_msg = sprint(showerror, e)
         @test contains(error_msg, "Checksum violation")
         @test contains(error_msg, "correct checksum")
+    end
+end
+
+let test_cases = [
+        (ArXiv, ["2301.12345", "hep-th/9901001", "0704.0001v1"]),
+        (DOI, ["10.1000/182", "10.1038/nature12373"]),
+        (ORCID, ["0000-0002-1825-0097", "0000-0003-1419-2405"]),
+        (ISSN, ["0317-8471", "1050-124X"]),
+        (ISBN, ["978-0-439-02348-1", "0-684-84328-5"]),
+        (ISNI, ["0000 0001 2281 955X", "0000 0000 8389 1195"]),
+        (OCN, ["1234567", "12345678"]),
+        (RAiD, ["10.1000/182", "10.1038/nature12373"]),
+        (ROR, ["05dxps055", "02jx3x895"]),
+        (PMID, ["12345678", "1234567"]),
+        (PMCID, ["PMC123456", "PMC1234567"]),
+        (VIAF, ["12345678", "87654321"]),
+        (Wikidata, ["Q42", "Q123456"]),
+        (OpenAlexID{:W}, ["W2741809807"]),
+        (OpenAlexID{:A}, ["A2208157607"]),
+        (OpenAlexID{:S}, ["S2741809807"])]
+
+    @testset "JSON Extension" begin
+        for (IdType, examples) in test_cases
+            @testset "$IdType" begin
+                for example in examples
+                    id = parse(IdType, example)
+                    @show id
+                    @show JSON.json(id)
+                    @show JSON.parse(JSON.json(id), IdType)
+                    @test JSON.parse(JSON.json(id), IdType) == id
+                end
+            end
+        end
+        @testset "Malformed Identifier Handling" begin
+            # Test AcademicIdentifiers-specific error cases, not general JSON3 errors
+            malformed_cases = [
+                (ArXiv, "not-an-arxiv"),
+                (DOI, "invalid-doi"),
+                (ORCID, "bad-orcid-format"),
+                (ISBN, "not-an-isbn"),
+                (OpenAlexID{:W}, "not-an-openalex")
+            ]
+            for (IdType, malformed_str) in malformed_cases
+                json_str = string('"', malformed_str, '"')
+                @test_throws MalformedIdentifier JSON.parse(json_str, IdType)
+            end
+        end
+    end
+
+    @testset "JSON3 Extension" begin
+        for (IdType, examples) in test_cases
+            @testset "$IdType" begin
+                for example in examples
+                    id = parse(IdType, example)
+                    @test JSON3.read(JSON3.write(id), IdType) == id
+                end
+            end
+        end
+        @testset "Malformed Identifier Handling" begin
+            # Test AcademicIdentifiers-specific error cases, not general JSON3 errors
+            malformed_cases = [
+                (ArXiv, "not-an-arxiv"),
+                (DOI, "invalid-doi"),
+                (ORCID, "bad-orcid-format"),
+                (ISBN, "not-an-isbn"),
+                (OpenAlexID{:W}, "not-an-openalex")
+            ]
+            for (IdType, malformed_str) in malformed_cases
+                json_str = string('"', malformed_str, '"')
+                @test_throws MalformedIdentifier JSON3.read(json_str, IdType)
+            end
+        end
     end
 end

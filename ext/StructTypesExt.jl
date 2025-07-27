@@ -6,9 +6,7 @@ module StructTypesExt
 using AcademicIdentifiers
 using StructTypes
 
-for idtype in (ArXiv, DOI, ISNI, ISSN, ISBN, OCN, ORCID, OpenAlexID, RAiD, ROR, PMID, PMCID, VIAF, Wikidata)
-    @eval StructTypes.StructType(::Type{$idtype}) = StructTypes.StringType()
-    @eval StructTypes.construct(::Type{$idtype}, id::String; _kw...) = parse($idtype, id)
-end
+StructTypes.StructType(::Type{<:AcademicIdentifier}) = StructTypes.StringType()
+StructTypes.construct(::Type{T}, id::String; _kw...) where {T<:AcademicIdentifier} = parse(T, id)
 
 end
