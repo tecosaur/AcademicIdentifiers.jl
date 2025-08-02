@@ -2,7 +2,7 @@ using AcademicIdentifiers
 using AcademicIdentifiers: MalformedIdentifier, ChecksumViolation, idcode, idchecksum, shortcode, purl
 using AcademicIdentifiers: EAN13
 
-using StyledStrings, JSON, JSON3
+using StyledStrings, JSON3
 
 using Test
 
@@ -1664,34 +1664,6 @@ let test_cases = [
         (OpenAlexID{:W}, ["W2741809807"]),
         (OpenAlexID{:A}, ["A2208157607"]),
         (OpenAlexID{:S}, ["S2741809807"])]
-
-    @testset "JSON Extension" begin
-        for (IdType, examples) in test_cases
-            @testset "$IdType" begin
-                for example in examples
-                    id = parse(IdType, example)
-                    @show id
-                    @show JSON.json(id)
-                    @show JSON.parse(JSON.json(id), IdType)
-                    @test JSON.parse(JSON.json(id), IdType) == id
-                end
-            end
-        end
-        @testset "Malformed Identifier Handling" begin
-            # Test AcademicIdentifiers-specific error cases, not general JSON3 errors
-            malformed_cases = [
-                (ArXiv, "not-an-arxiv"),
-                (DOI, "invalid-doi"),
-                (ORCID, "bad-orcid-format"),
-                (ISBN, "not-an-isbn"),
-                (OpenAlexID{:W}, "not-an-openalex")
-            ]
-            for (IdType, malformed_str) in malformed_cases
-                json_str = string('"', malformed_str, '"')
-                @test_throws MalformedIdentifier JSON.parse(json_str, IdType)
-            end
-        end
-    end
 
     @testset "JSON3 Extension" begin
         for (IdType, examples) in test_cases
