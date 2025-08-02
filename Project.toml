@@ -1,7 +1,7 @@
 name = "AcademicIdentifiers"
 uuid = "73aec6e9-1368-4429-b03d-50b89ba0733e"
-version = "0.1.0"
 authors = ["TEC <contact@tecosaur.net>"]
+version = "1.0.0"
 
 [deps]
 FastIdentifiers = "4753c187-0528-4cab-a788-b8a80107dae0"
