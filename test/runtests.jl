@@ -2,7 +2,7 @@ using AcademicIdentifiers
 using AcademicIdentifiers: MalformedIdentifier, ChecksumViolation, idcode, idchecksum, shortcode, purl
 using AcademicIdentifiers: EAN13
 
-using JSON, JSON3
+using StyledStrings, JSON, JSON3
 
 using Test
 
