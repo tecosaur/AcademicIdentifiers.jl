@@ -227,6 +227,22 @@ end
         for doi in doi_examples
             @test eval(Meta.parse(repr(doi))) == doi
         end
+
+        # Test hash and equality with case-folding
+        doi1 = parse(DOI, "10.1000/ABC")
+        doi2 = parse(DOI, "10.1000/abc")
+        doi3 = parse(DOI, "10.1000/AbC")
+        doi4 = parse(DOI, "10.1000/xyz")
+
+        @test doi1 == doi2
+        @test doi1 == doi3
+        @test doi2 == doi3
+        @test doi1 != doi4
+
+        @test hash(doi1) == hash(doi2)
+        @test hash(doi1) == hash(doi3)
+        @test hash(doi2) == hash(doi3)
+        @test hash(doi1) != hash(doi4)
     end
 end
 

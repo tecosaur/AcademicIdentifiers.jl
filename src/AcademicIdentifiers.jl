@@ -280,7 +280,11 @@ function choplowerprefix(s::SubString, prefix::AbstractString)
         isnothing(j) && isnothing(i) && return true, SubString(s, 1, 0)
         isnothing(j) && return true, @inbounds SubString(s, k)
         isnothing(i) && return false, s
-        UInt32(first(i)) | 0x20 == UInt32(first(j)) || return false, s
+        ui, uj = UInt32(first(i)), UInt32(first(j))
+        if ui ∈ 0x41:0x5a
+            ui |= 0x20
+        end
+        ui == uj || return false, s
         k = last(i)
         i, j = iterate(s, k), iterate(prefix, last(j))
     end
@@ -562,8 +566,9 @@ function Base.:(==)(a::DOI, b::DOI)
     a.registrant == b.registrant || return false
     ncodeunits(a.object) == ncodeunits(b.object) || return false
     for (ca, cb) in zip(codeunits(a.object), codeunits(b.object))
-        xascii = ifelse(ca < 0x80, 0x20, 0x00)
-        (ca | xascii) == (cb | xascii) || return false
+        xasciia = ifelse(ca ∈ 0x41:0x5a, 0x20, 0x00)
+        xasciib = ifelse(cb ∈ 0x41:0x5a, 0x20, 0x00)
+        (ca | xasciia) == (cb | xasciib) || return false
     end
     true
 end
@@ -571,7 +576,7 @@ end
 function Base.hash(doi::DOI, h::UInt)
     h = hash(doi.registrant, h)
     for c in codeunits(doi.object)
-        xascii = ifelse(c < 0x80, 0x20, 0x00)
+        xascii = ifelse(c ∈ 0x41:0x5a, 0x20, 0x00)
         h = hash(c | xascii, h)
     end
     h
@@ -838,7 +843,7 @@ Base.hash(raid::RAiD, h::UInt) = hash(raid.id, h)
 # ROR
 
 Base.@assume_effects :foldable function croc32decode(::Type{T}, str::AbstractString) where {T <: Integer}
-    svec = codeunits(str) .| 0x20 # Convert to lowercase
+    svec = codeunits(str) .| 0x20 # Assume letters, convert to lowercase
     skipchars = UInt8.(('i', 'l', 'o', 'u'))
     svec .= svec .- (UInt8(count(s .> skipchars)) for s in svec)
     parse(T, String(svec), base=32)
