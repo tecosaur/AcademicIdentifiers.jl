@@ -3,6 +3,7 @@
 
 #+html: <a href="https://tecosaur.net"><img src="https://img.shields.io/badge/%F0%9F%A6%95-tec-27a560.svg"></a>
 #+html: <a href="https://www.tldrlegal.com/license/mozilla-public-license-2-0-mpl-2"><img src="https://img.shields.io/badge/license-MPL%202.0-teal.svg"></a>
+#+html: <a href="https://coveralls.io/github/tecosaur/AcademicIdentifiers.jl"><img src="https://coveralls.io/repos/github/tecosaur/AcademicIdentifiers.jl/badge.svg"></a>
 #+html: <a href="https://liberapay.com/tec"><img src="https://shields.io/badge/support%20my%20efforts-f6c915?logo=Liberapay&logoColor=black"></a>
 
 Structured and validated types for common identifiers used in/around academic
