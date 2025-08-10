@@ -32,7 +32,7 @@ julia> doi = parse(DOI, "10.1371/journal.pone.0068810")
 DOI:10.1371/journal.pone.0068810
 
 julia> string(doi)
-"10.1371/journal.pone.0068810"
+"doi:10.1371/journal.pone.0068810"
 
 julia> purl(doi)
 "https://doi.org/10.1371/journal.pone.0068810"
@@ -325,8 +325,17 @@ function parseid(::Type{DOI}, doi::SubString{String})
     else
         doi, ""
     end
-    '.' in registrant && all(c -> c == '.' || c ∈ '0':'9', registrant) ||
-        return MalformedIdentifier{DOI}(doi, "registrant must be a string of digits and periods")
+    isempty(object) && return MalformedIdentifier{DOI}(doi, "must contain an object component after the slash")
+    lastdecimal = 0
+    for (i, char) in enumerate(codeunits(registrant))
+        if char == UInt8('.')
+            i - 1 == lastdecimal && return MalformedIdentifier{DOI}(doi, "registrant cannot initial or consecutive periods")
+            lastdecimal = i
+        elseif char ∉ UInt8('0'):UInt8('9')
+            return MalformedIdentifier{DOI}(doi, "registrant must be a sequence of digits and periods")
+        end
+    end
+    lastdecimal == 0 && return MalformedIdentifier{DOI}(doi, "registrant must contain at least one period")
     DOI(registrant, object)
 end
 
@@ -437,16 +446,15 @@ https://orcid.org/0000-0001-5109-3700
 
 julia> parse(ORCID, "0000-0001-5109-3701")
 ERROR: Checksum violation: the correct checksum for ORCID identifier 15109370 is 0 but got 1
-````
+```
 """
 struct ORCID <: AcademicIdentifier
     id::UInt64
-    function ORCID(id::Union{Int64, UInt64}, checksum::Integer)
+    function ORCID(id::Union{Int64, UInt64})
+        id >= 0 || throw(MalformedIdentifier{ORCID}(id, "must be a non-negative integer"))
         ndigits(id) <= 15 || throw(MalformedIdentifier{ORCID}(id, "must be a 16-digit integer"))
         i7064check = iso7064mod11m2checksum(id)
-        i7064check == checksum ||
-            throw(ChecksumViolation{ORCID}(id, i7064check, checksum))
-        oid = UInt64(id) + UInt64(checksum) << 60
+        oid = UInt64(id) + UInt64(i7064check) << 60
         new(oid)
     end
 end
@@ -646,19 +654,22 @@ https://ror.org/05cy4wa09
 
 julia> parse(ROR, "05cy4wa08")
 ERROR: Checksum violation: the correct checksum for ROR identifier 05cy4wa is 9 but got 8
-````
+```
 """
 struct ROR <: AcademicIdentifier
     num::Int32
-    function ROR(num::Integer, check::Integer)
+    function ROR(num::Integer)
         num >= 0 || throw(MalformedIdentifier{ROR}(num, "must be a non-negative value"))
         num <= croc32decode(Int, "zzzzzz") || throw(MalformedIdentifier{ROR}(croc32encode(num), "must be no more than 6-digits"))
-        checkexpected = 98 - ((num * 100) % 97)
-        if check != checkexpected
-            throw(ChecksumViolation{ROR}('0' * croc32encode(num), checkexpected, check))
-        end
         new(Int32(num))
     end
+end
+
+function ROR(num::Integer, check::Integer)
+    ror = ROR(num)
+    check == idchecksum(ror) ||
+        throw(ChecksumViolation{ROR}('0' * croc32encode(num), idchecksum(ror), check))
+    ror
 end
 
 function parseid(::Type{ROR}, num::SubString)
@@ -718,7 +729,7 @@ end
 function parseid(::Type{PMID}, id::SubString)
     chopped, id = lchopfolded(id, "pmid:")
     if !chopped
-        _, id = lchopfolded(id, "https://", "http://", "pubmed.ncbi.nlm.nih.gov/")
+        _, id = lchopfolded(id, "https://", "http://", "www.", "pubmed.ncbi.nlm.nih.gov/")
     end
     pint = parsefor(PMID, UInt, id)
     pint isa UInt || return pint
@@ -771,7 +782,7 @@ end
 function parseid(::Type{PMCID}, id::SubString)
     chopped, id = lchopfolded(id, "pmcid:", "pmc")
     if !chopped
-        _, id = lchopfolded(id, "https://", "http://", "www.ncbi.nlm.nih.gov/pmc/articles/")
+        _, id = lchopfolded(id, "https://", "http://", "www.", "ncbi.nlm.nih.gov/pmc/articles/", "pmc")
     end
     pint = parsefor(PMCID, UInt, id)
     pint isa UInt || return pint
@@ -809,13 +820,10 @@ ISNI:0000 0001 2103 2683
 """
 struct ISNI <: AcademicIdentifier
     code::UInt64
-    function ISNI(id::Union{Int64, UInt64}, checksum::Integer)
+    function ISNI(id::Union{Int64, UInt64})
         ndigits(id) <= 15 || throw(MalformedIdentifier{ISNI}(id, "must be a 15-digit integer"))
-        i7064check = iso7064mod11m2checksum(id)
-        i7064check == checksum ||
-            throw(ChecksumViolation{ISNI}(id, i7064check, checksum))
-        code = UInt64(id) + UInt64(checksum) << 60
-        new(code)
+        check = iso7064mod11m2checksum(id)
+        new(UInt64(id) + UInt64(check) << 60)
     end
 end
 
@@ -881,18 +889,14 @@ ERROR: Checksum violation: the correct checksum for ISSN identifier 1095505 is 4
 """
 struct ISSN <: AcademicIdentifier
     code::UInt32
-    function ISSN(id::Union{UInt32, Int32, UInt64, Int64}, checksum::Integer)
+    function ISSN(id::Union{UInt32, Int32, UInt64, Int64})
         ndigits(id) <= 7 || throw(MalformedIdentifier{ISSN}(id, "must be a 7-digit integer"))
         digsum = 0
         for (i, dig) in enumerate(digits(id, pad=7))
             digsum += (i + 1) * dig
         end
         checkcalc = (11 - digsum % 11) % 11
-        if checkcalc != checksum
-            throw(ChecksumViolation{ISSN}(id, checkcalc, checksum))
-        end
-        code = UInt32(id) + UInt32(checksum) << 24
-        new(code)
+        new(UInt32(id) + UInt32(checkcalc) << 24)
     end
 end
 
@@ -1032,9 +1036,8 @@ end
 Base.convert(::Type{EAN13}, isbn::ISBN) = isbn.code
 
 function Base.convert(::Type{ISBN}, ean::EAN13)
-    if idcode(ean) ÷ 10^9 ∉ (978, 979)
-        return MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979")
-    end
+    idcode(ean) ÷ 10^9 ∈ (978, 979) ||
+        throw(MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979"))
     ISBN(ean)
 end
 
@@ -1051,7 +1054,7 @@ function parseid(::Type{ISBN}, code::SubString)
     if length(plaincode) == 13
         iint = parsefor(ISBN, UInt64, plaincode)
         iint isa UInt64 || return iint
-        ISBN(iint)
+        try ISBN(iint) catch e; e end
     elseif length(plaincode) == 10
         cdigits..., check = plaincode
         dcode = parsefor(ISBN, UInt, cdigits)
@@ -1070,22 +1073,10 @@ function parseid(::Type{ISBN}, code::SubString)
             eansum += if i % 2 == 0 dig else dig * 3 end
         end
         eancheck = (10 - eansum % 10) % 10
-        ISBN(EAN13(dcode, eancheck, 0x1000 | UInt8(cdigit)))
+        try ISBN(EAN13(dcode, eancheck, 0x1000 | UInt8(cdigit))) catch e; e end
     else
         return MalformedIdentifier{ISBN}(code, "must be a 10 or 13-digit integer")
     end
-end
-
-idcode(isbn::ISBN) = idcode(isbn.code)
-idchecksum(isbn::ISBN) = idchecksum(isbn.code)
-
-function shortcode(io::IO, isbn::ISBN)
-    (; prefix, group, publisher, title, check) = isbn_hyphenate(isbn)
-    isempty(prefix) || print(io, prefix, '-')
-    isempty(group) || print(io, group, '-')
-    isempty(publisher) || print(io, publisher, '-')
-    isempty(title) || print(io, title, '-')
-    print(io, check)
 end
 
 function Base.print(io::IO, isbn::ISBN)
@@ -1094,13 +1085,14 @@ function Base.print(io::IO, isbn::ISBN)
     shortcode(io, isbn)
 end
 
-function isbn_hyphenate(isbn::ISBN)
+function shortcode(io::IO, isbn::ISBN)
     flag = UInt16((isbn.code.code & UInt64(0xffff) << 48) >> 48)
     code3, code10 = if iszero(flag)
         divrem(isbn.code.code, 10^10)
     else
         978, idcode(isbn.code) * 10 + idchecksum(isbn.code)
     end
+    iszero(flag) && print(io, lpad(code3, 3, '0'), '-')
     # Find group length by checking which range the first 7 digits fall into
     first7 = code10 ÷ 1000
     group_length = 0
@@ -1119,6 +1111,7 @@ function isbn_hyphenate(isbn::ISBN)
     else
         0, code10
     end
+    group_length > 0 && print(io, lpad(codegroup, group_length, '0'), '-')
     # Find publisher length by checking which range the remaining digits fall into
     remaining_digits = 10 - group_length
     remaining_padded = if remaining_digits < 7
@@ -1141,11 +1134,12 @@ function isbn_hyphenate(isbn::ISBN)
         publisher_length > 0 && break
     end
     # Extract publisher, title, and check digit using mathematical operations
-    if publisher_length > 0
-        publisher, title_and_check = divrem(remaining_after_group, 10^(remaining_digits - publisher_length))
+    publisher, title_and_check = if publisher_length > 0
+        divrem(remaining_after_group, 10^(remaining_digits - publisher_length))
     else
-        publisher, title_and_check = 0, remaining_after_group
+        0, remaining_after_group
     end
+    publisher_length > 0 && print(io, lpad(publisher, publisher_length, '0'), '-')
     # Split title and check digit
     if title_and_check >= 10
         title, check_digit = divrem(title_and_check, 10)
@@ -1153,20 +1147,14 @@ function isbn_hyphenate(isbn::ISBN)
         title, check_digit = 0, title_and_check
     end
     title_length = remaining_digits - publisher_length - 1
-    (prefix = if iszero(flag) lpad(code3, 3, '0') else "" end,
-     group = lpad(codegroup, group_length, '0'),
-     publisher = lpad(publisher, publisher_length, '0'),
-     title = if title_length ∈ 1:9
-         lpad(title, title_length, '0')
+    title_length ∈ 1:9 && print(io, lpad(title, title_length, '0'), '-')
+    check = if iszero(flag)
+        Char(0x30 + check_digit)
      else
-         ""
-     end,
-     check = if iszero(flag)
-         Char(0x30 + check_digit)
-     else
-         check_char = Int8(flag & 0x00ff)
-         '0' + ifelse(check_char == 0xa, 0x28, check_char)
-     end)
+        check_char = Int8(flag & 0x00ff)
+        '0' + ifelse(check_char == 0xa, 0x28, check_char)
+    end
+    print(io, check)
 end
 
 
@@ -1229,6 +1217,7 @@ Wikidata:Q42
 
 julia> print(parse(Wikidata, "Q42"))
 Q42
+```
 """
 struct Wikidata <: AcademicIdentifier
     id::UInt64
