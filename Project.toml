@@ -3,27 +3,15 @@ uuid = "73aec6e9-1368-4429-b03d-50b89ba0733e"
 version = "0.1.0"
 authors = ["TEC <contact@tecosaur.net>"]
 
-[weakdeps]
-StructTypes = "856f2bd8-1eba-4b0a-8007-ebc267875bd4"
-StructUtils = "ec057cc2-7a8d-4b58-b3b3-92acb9f63b42"
-StyledStrings = "f489334b-da3d-4c2e-b8f0-e476e12c162b"
-
-[extensions]
-PrettyPrintExt = "StyledStrings"
-StructTypesExt = "StructTypes"
-StructUtilsExt = "StructUtils"
+[deps]
+DigitalIdentifiersBase = "4753c187-0528-4cab-a788-b8a80107dae0"
 
 [compat]
-StructTypes = "1"
-StructUtils = "2.1"
-StyledStrings = "1"
+DigitalIdentifiersBase = "1"
 julia = "1.9"
 
 [extras]
-JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
-JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
-StyledStrings = "f489334b-da3d-4c2e-b8f0-e476e12c162b"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["StyledStrings", "Test", "JSON", "JSON3"]
+test = ["Test"]

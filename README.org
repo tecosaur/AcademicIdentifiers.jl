@@ -7,55 +7,8 @@
 #+html: <a href="https://liberapay.com/tec"><img src="https://shields.io/badge/support%20my%20efforts-f6c915?logo=Liberapay&logoColor=black"></a>
 
 Structured and validated types for common identifiers used in/around academic
-work.
-
-* Why?
-
-It's tempting to just use plain strings or integers to represent identifiers
-representing digital pieces of data. Unfortunately, it's easy to end up in a
-situation where the lack of structure creates an opportunity for a wide range of
-problems:
-+ Failing to detect malformed identifiers
-+ Fragile code that relies on a single specific formatting
-+ Forgetting to include the proper prefix, hyphenation, or other formatting
-+ Stylistic differences making equality testing fragile
-+ Annoyances when parsing/serialising the identifier
-+ Undocumented (and unverified) assumptions that a particular string/number just
-  happens to represent a specific kind of identifier
-
-For all of these reasons it is worth formalising interaction with identifiers.
-=AcademicIdentifiers= provides both a framework for doing so, as well as
-implementations for a collection of common identifiers seen in academic
-contexts.
-
-* Generic framework
-
-An abstract ~AcademicIdentifier~ type is introduced (see the docstring for more
-information), along with the error types ~MalformedIdentifier~ and
-~ChecksumViolation~.
-
-An ~AcademicIdentifier~ can be constructed from its canonical string
-representation (or variations thereof), and can be returned to a canonical
-representation by ~print~ or ~string~. It is usual for an identifier to be displayed
-in the format =name:shortcode= in the REPL, with a hyperlink to the canonical page for
-the resource if possible.
-
-The underlying integer identifier can be extracted using the ~idcode~ accessor
-function, and similarly the checksum (when applicable) using the ~idchecksum~
-accessor function.
-
-#+begin_src julia
-parse(::Type{T<:AcademicIdentifier}, representation::String) -> T
-
-shortcode(id::AcademicIdentifier) -> String (minimal form)
-purl(id::AcademicIdentifier) -> Union{String, Nothing}
-
-print(id::AcademicIdentifier) -> Nothing (print canonical string form)
-string(id::AcademicIdentifier) -> String (canonical form)
-#+end_src
-
-Parsing is generally permissive, with the intent being to accept all unambiguous
-forms. Output formatting is strict.
+work. See [[https://code.tecosaur.net/tec/DigitalIdentifiersBase.jl][DigitalIdentifiersBase.jl]] for the motivation of identifier-types
+packages, and the identifier API.
 
 * Implemented identifiers
 
@@ -73,3 +26,24 @@ forms. Output formatting is strict.
 + ~PMCID~
 + ~VIAF~
 + ~Wikidata~
+
+* Example usage
+
+#+begin_src julia-repl
+julia> using AcademicIdentifiers
+
+julia> doi = parse(DOI, "10.1371/journal.pone.0068810")
+DOI:10.1371/journal.pone.0068810
+
+julia> string(doi)
+"10.1371/journal.pone.0068810"
+
+julia> purl(doi)
+"https://doi.org/10.1371/journal.pone.0068810"
+
+julia> orcid = parse(ORCID, "https://orcid.org/0000-0002-1825-0097")
+ORCID:0000-0002-1825-0097
+
+julia> shortcode(orcid)
+"0000-0002-1825-0097"
+#+end_src

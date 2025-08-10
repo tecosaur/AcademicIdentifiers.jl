@@ -1,270 +1,71 @@
 # SPDX-FileCopyrightText: © 2025 TEC <contact@tecosaur.net>
 # SPDX-License-Identifier: MPL-2.0
 
+"""
+    AcademicIdentifiers
+
+Structured and validated types for academic identifiers.
+
+## Implemented Identifiers
+
+- `ArXiv` - arXiv preprint identifiers
+- `DOI` - Digital Object Identifiers
+- `ISNI` - International Standard Name Identifiers
+- `ISSN` - International Standard Serial Numbers
+- `ISBN` - International Standard Book Numbers
+- `OCN` - OCLC Control Numbers
+- `ORCID` - Open Researcher and Contributor Identifiers
+- `OpenAlexID` - OpenAlex identifiers
+- `RAiD` - Research Activity Identifiers
+- `ROR` - Research Organization Registry identifiers
+- `PMID` - PubMed Identifiers
+- `PMCID` - PubMed Central Identifiers
+- `VIAF` - Virtual International Authority File identifiers
+- `Wikidata` - Wikidata entity identifiers
+
+## Examples
+
+```julia
+julia> using AcademicIdentifiers
+
+julia> doi = parse(DOI, "10.1371/journal.pone.0068810")
+DOI:10.1371/journal.pone.0068810
+
+julia> string(doi)
+"10.1371/journal.pone.0068810"
+
+julia> purl(doi)
+"https://doi.org/10.1371/journal.pone.0068810"
+
+julia> orcid = parse(ORCID, "https://orcid.org/0000-0002-1825-0097")
+ORCID:0000-0002-1825-0097
+
+julia> shortcode(orcid)
+"0000-0002-1825-0097"
+```
+"""
 module AcademicIdentifiers
 
+using DigitalIdentifiersBase
+import DigitalIdentifiersBase: idcode, idchecksum, shortcode, purl, purlprefix, parseid, parsefor, lchopfolded
+
 export AcademicIdentifier, ArXiv, DOI, ISNI, ISSN, ISBN, OCN, ORCID, OpenAlexID, RAiD, ROR, PMID, PMCID, VIAF, Wikidata
-export shortcode, purl
+DigitalIdentifiersBase.@reexport
 
 include("isbn-hyphenation.jl")
 
 """
-    AcademicIdentifier
+    AcademicIdentifier <: AbstractIdentifier
 
 An abstract type representing an academic identifier.
 
 Academic identifiers are unique identifiers referring to resources used in
 academic and scholarly contexts. They can refer to a wide variety of resources,
-including publications, researchers, and organisations. This type is used to
-represent a common interface for working with these identifiers.
+including publications, researchers, and organisations.
 
-It is expected that all identifiers have a plain text canonical form, and
-optionally a PURL (Persistent Uniform Resource Locator) that can be used to link
-to the resource. These may be one and the same.
-
-# Extended help
-
-**Interface and guidelines**
-
-## Mandatory components
-
-Your academic identifier, named `AId` for example, must be able to be constructed
-from its canonical form as well as the plain form (these may be the same).
-
-```julia
-parseid(AId, "canonical string form or purl") -> AId or Exception
-parseid(AId, "minimal plain form") -> AId or Exception
-shortcode(::AId) -> String
-```
-
-The `parseid` function is used in generic `parse` and `tryparse` implementations.
-You can either implement `parseid` or define both `parse` and `tryparse` methods.
-
-Invariants:
-- `AId(shortcode(x::AId)) == x`
-- `x::AId == y::AId` *iff* `shortcode(x) == shortcode(y)`
-
-If the constructor is passed a string that doesn't match the expected format, is
-is reasonable to throw a [`MalformedIdentifier`](@ref) error.
-
-When there is a checksum component to the identifier, it is usual for an inner
-constructor to be defined that verifies the checksum matches or throw a
-[`ChecksumViolation`](@ref) error. This makes invalid identifiers
-unconstructable.
-
-## Standard components
-
-Most identifiers can be represented in a numerical form, possibly with a
-checksum value. Should that be the case, it is recommended that you define the
-`idcode` and `idchecksum` accessors.
-
-```
-idcode(::AId) -> Integer
-idchecksum(::AId) -> Integer
-```
-
-When `idcode` is defined, the generic `shortcode` function will use it to
-construct the plain string representation of the identifier.
-
-Invariants:
-- `idcode(x::AId) == idcode(y::AId) && idchecksum(x) == idchecksum(y)` *iff* `x == y`
-
-## Optional components
-
-When a standard persistent URL exists for the resource, you should define either
-`purlprefix` when the URL is of the form `\$prefix\$(shortcode(x::AId))` or
-`purl(x::AId)` when the URL scheme is more complicated.
-
-```
-purlprefix(::Type{AId}) -> String
-purl(::Type{AId}) -> String
-```
-
-Invariants:
-- `AId(purl(x::AId)) == x`
-- `purl(x::AId) == purl(y::AId)` *iff* `x == y`
+See also: `AbstractIdentifier`.
 """
-abstract type AcademicIdentifier end
-
-"""
-    parseid(::Type{T}, input::SubString) -> Union{T, MalformedIdentifier{T}, ChecksumViolation{T}}
-
-Attempt to parse the `input` string as an identifier of type `T`.
-
-This is used by the generic `parse` and `tryparse` functions to interpret a string as a `T`, and
-should be implemented by  `AcademicIdentifier` subtypes.
-"""
-function parseid end
-
-function Base.parse(::Type{T}, input::AbstractString) where {T <: AcademicIdentifier}
-    id = parseid(T, SubString(input))
-    id isa T || throw(id)
-    id
-end
-
-function Base.tryparse(::Type{T}, input::AbstractString) where {T <: AcademicIdentifier}
-    id = parseid(T, SubString(input))
-    if id isa T id end
-end
-
-"""
-    MalformedIdentifier{T<:AcademicIdentifier}(input, problem::String) -> MalformedIdentifier{T}
-
-The provided `input` is not a recognised form of a `T` identifier,
-due to the specified `problem`.
-"""
-struct MalformedIdentifier{T <: AcademicIdentifier, I} <: Exception
-    input::I
-    problem::String
-end
-
-MalformedIdentifier{T}(input::I, problem::String) where {T, I} =
-    MalformedIdentifier{T, I}(input, problem)
-
-"""
-    ChecksumViolation{T<:AcademicIdentifier}(id, checksum, expected) -> ChecksumViolation{T}
-
-The checksum `checksum` for the `T` identifier `id` is incorrect; the correct
-checksum is `expected`.
-"""
-struct ChecksumViolation{T <: AcademicIdentifier, I} <: Exception
-    id::I
-    checksum::Integer
-    expected::Integer
-end
-
-ChecksumViolation{T}(id::I, checksum::Integer, expected::Integer) where {T, I} =
-    ChecksumViolation{T, I}(id, checksum, expected)
-
-"""
-    idcode(id::AcademicIdentifier) -> Union{Integer, Nothing}
-
-If applicable, return the base identifier of an `AcademicIdentifier`.
-"""
-function idcode(::AcademicIdentifier) end
-
-"""
-    idchecksum(id::AcademicIdentifier) -> Union{Integer, Nothing}
-
-If applicable, return the check digit of an `AcademicIdentifier`.
-"""
-function idchecksum(::AcademicIdentifier) end
-
-"""
-    shortcode(id::AcademicIdentifier) -> String
-
-Return a plain string representation of an `AcademicIdentifier`.
-
-This should be the minimal complete representation of the identifier,
-with no additional formatting.
-
-The canonical form for the identifier should contain the plain identifier,
-but may include additional information such as a standard prefix and/or suffix.
-"""
-shortcode(id::AcademicIdentifier) = string(idcode(id))
-
-"""
-    purlprefix(::Type{<:AcademicIdentifier}) -> Union{String, Nothing}
-
-Return the standard prefix of a PURL for an `AcademicIdentifier`, if applicable.
-
-If defined, this implies that a PURL can be constructed by appending the `shortcode`
-representation of the identifier to this prefix. As such, you should take care to
-include any necessary trailing slashes or other separators in this prefix.
-"""
-function purlprefix(::Type{T}) where {T <: AcademicIdentifier} end
-
-purlprefix(::T) where {T <: AcademicIdentifier} = purlprefix(T)
-
-"""
-    purl(id::AcademicIdentifier) -> Union{String, Nothing}
-
-If applicable, return the PURL of an `AcademicIdentifier`.
-
-PURLs are Persistent Uniform Resource Locators that provide a permanent link to
-a resource.
-"""
-function purl(id::AcademicIdentifier)
-    prefix = purlprefix(id)
-    if !isnothing(prefix)
-        prefix * shortcode(id)
-    end
-end
-
-function Base.print(io::IO, id::AcademicIdentifier)
-    print(io, something(purl(id), shortcode(id)))
-end
-
-function Base.show(io::IO, id::AcademicIdentifier)
-    show(io, parse)
-    show(io, (typeof(id), shortcode(id)))
-end
-
-function Base.isless(a::T, b::T) where {T <: AcademicIdentifier}
-    ca = idcode(a)
-    cb = idcode(b)
-    (isnothing(ca) || isnothing(cb)) && return isless(shortcode(a), shortcode(b))
-    ca < cb
-end
-
-
-# General utilities
-
-"""
-    parsefor(::Type{T<:AcademicIdentifier}, ::Type{I<:Integer}, num::Union{<:AbstractString, <:AbstractChar})
-
-Attempt to parse the `num` string as an integer of type `I`, returning it if successful.
-
-If the string cannot be parsed as an integer, a `MalformedIdentifier{T}` exception is returned.
-"""
-function parsefor(::Type{T}, ::Type{I}, num::Union{<:AbstractString, <:AbstractChar}) where {T <: AcademicIdentifier, I <: Integer}
-    int = if num isa Char
-        try parse(I, num) catch end # See: <https://github.com/JuliaLang/julia/issues/45640>
-    else
-        tryparse(I, num)
-    end
-    if isnothing(int)
-        (@noinline function(iT, inum)
-             nonint = if inum isa AbstractChar inum else filter(c -> c ∉ '0':'9', inum) end
-             MalformedIdentifier{T}(inum, "includes invalid base 10 digit$(ifelse(length(nonint)==1, "", "s")) '$(nonint)'")
-         end)(T, num)
-    else
-        int
-    end
-end
-
-"""
-    chopprefix(s::SubString, prefix::AbstractString) -> Tuple{Bool, SubString}
-
-Remove an ASCII `prefix` from the start of `s`, ignoring case.
-
-The `prefix` argument must be lowercase.
-"""
-function choplowerprefix(s::SubString, prefix::AbstractString)
-    k = firstindex(s)
-    i, j = iterate(s), iterate(prefix)
-    while true
-        isnothing(j) && isnothing(i) && return true, SubString(s, 1, 0)
-        isnothing(j) && return true, @inbounds SubString(s, k)
-        isnothing(i) && return false, s
-        ui, uj = UInt32(first(i)), UInt32(first(j))
-        if ui ∈ 0x41:0x5a
-            ui |= 0x20
-        end
-        ui == uj || return false, s
-        k = last(i)
-        i, j = iterate(s, k), iterate(prefix, last(j))
-    end
-end
-
-function chopprefixes(s::SubString, prefixes::String...)
-    chopped = false
-    for prefix in prefixes
-        did, s = choplowerprefix(s, prefix)
-        chopped |= did
-    end
-    chopped, s
-end
+abstract type AcademicIdentifier <: AbstractIdentifier end
 
 digitstart(s::AbstractString) = !isempty(s) && isdigit(first(s))
 
@@ -322,14 +123,14 @@ struct ArXiv <: AcademicIdentifier
 end
 
 function parseid(::Type{ArXiv}, id::SubString)
-    _, id = chopprefixes(id, "https://", "http://")
-    isweb, id = chopprefixes(id, "arxiv.org/")
+    _, id = lchopfolded(id, "https://", "http://")
+    isweb, id = lchopfolded(id, "arxiv.org/")
     if isweb
         prefixend = findfirst('/', id)
         isnothing(prefixend) && return MalformedIdentifier{ArXiv}(id, "incomplete ArXiv URL")
         id = @view id[prefixend+1:end]
     else
-        _, id = chopprefixes(id, "arxiv:")
+        _, id = lchopfolded(id, "arxiv:")
     end
     if occursin('/', id)
         arxiv_old(id)
@@ -506,9 +307,9 @@ end
 
 function parseid(::Type{DOI}, doi::SubString{String})
     if !digitstart(doi)
-        chopped, doi = chopprefixes(doi, "doi:")
+        chopped, doi = lchopfolded(doi, "doi:")
         if !chopped
-            _, doi = chopprefixes(doi, "https://", "http://", "dx.doi.org/", "doi.org/")
+            _, doi = lchopfolded(doi, "https://", "http://", "dx.doi.org/", "doi.org/")
         end
     end
     registrant, object = if '/' in doi
@@ -581,10 +382,10 @@ end
 function parseid(::Type{OCN}, id::SubString)
     isempty(id) && return MalformedIdentifier{OCN}(id, "cannot be empty")
     if first(id) == '('
-        _, id = chopprefixes(id, "(ocolc)")
+        _, id = lchopfolded(id, "(ocolc)")
     end
     if !isempty(id) && !isdigit(first(id))
-        _, id = chopprefixes(id, "ocn:", "oclc:", "ocolc", "oclc", "ocm", "ocn", "on", "https://", "www.", "worldcat.org/oclc/")
+        _, id = lchopfolded(id, "ocn:", "oclc:", "ocolc", "oclc", "ocm", "ocn", "on", "https://", "www.", "worldcat.org/oclc/")
     end
     id = lstrip(id)
     all(isdigit, id) || return MalformedIdentifier{OCN}(id, "must only consist of digits")
@@ -637,7 +438,7 @@ struct ORCID <: AcademicIdentifier
         ndigits(id) <= 15 || throw(MalformedIdentifier{ORCID}(id, "must be a 16-digit integer"))
         i7064check = iso7064mod11m2checksum(id)
         i7064check == checksum ||
-            throw(ChecksumViolation{ORCID}(id, checksum, i7064check))
+            throw(ChecksumViolation{ORCID}(id, i7064check, checksum))
         oid = UInt64(id) + UInt64(checksum) << 60
         new(oid)
     end
@@ -645,9 +446,9 @@ end
 
 function parseid(::Type{ORCID}, id::SubString)
     if !digitstart(id)
-        chopped, id = chopprefixes(id, "orcid:", "orcid ")
+        chopped, id = lchopfolded(id, "orcid:", "orcid ")
         if !chopped
-            _, id = chopprefixes(id, "https://", "http://", "orcid.org/")
+            _, id = lchopfolded(id, "https://", "http://", "orcid.org/")
         end
     end
     orcdigits = replace(id, '-' => "")
@@ -714,9 +515,9 @@ function parseid(::Type{OpenAlexID{kind}}, id::SubString) where {kind}
     isempty(id) && return MalformedIdentifier{OpenAlexID{kind}}(id, "cannot be empty")
     if first(id) ∈ (first(String(kind)), lowercase(first(String(kind))))
     else
-        chopped, id = chopprefixes(id, "openalex:")
+        chopped, id = lchopfolded(id, "openalex:")
         if !chopped
-            _, id = chopprefixes(id, "https://", "http://", "openalex.org/")
+            _, id = lchopfolded(id, "https://", "http://", "openalex.org/")
         end
         prefixend = findfirst('/', id)
         if !isnothing(prefixend)
@@ -734,9 +535,9 @@ function parseid(::Type{OpenAlexID}, id::SubString)
     isempty(id) && return MalformedIdentifier{OpenAlexID}(id, "cannot be empty")
     kindchar = uppercase(first(id))
     if kindchar ∉ ('W', 'A', 'S', 'I', 'C', 'P', 'F')
-        chopped, id = chopprefixes(id, "openalex:")
+        chopped, id = lchopfolded(id, "openalex:")
         if !chopped
-            _, id = chopprefixes(id, "https://", "http://", "openalex.org/")
+            _, id = lchopfolded(id, "https://", "http://", "openalex.org/")
         end
         prefixend = findfirst('/', id)
         if !isnothing(prefixend)
@@ -791,9 +592,9 @@ end
 Base.convert(::Type{DOI}, raid::RAiD) = raid.id
 
 function parseid(::Type{RAiD}, id::SubString)
-    chopped, id = chopprefixes(id, "raid:")
+    chopped, id = lchopfolded(id, "raid:")
     if !chopped
-        _, id = chopprefixes(id, "https://", "http://", "raid.org/")
+        _, id = lchopfolded(id, "https://", "http://", "raid.org/")
     end
     doi = parseid(DOI, id)
     doi isa DOI || return doi
@@ -852,16 +653,16 @@ struct ROR <: AcademicIdentifier
         num <= croc32decode(Int, "zzzzzz") || throw(MalformedIdentifier{ROR}(croc32encode(num), "must be no more than 6-digits"))
         checkexpected = 98 - ((num * 100) % 97)
         if check != checkexpected
-            throw(ChecksumViolation{ROR}('0' * croc32encode(num), check, checkexpected))
+            throw(ChecksumViolation{ROR}('0' * croc32encode(num), checkexpected, check))
         end
         new(Int32(num))
     end
 end
 
 function parseid(::Type{ROR}, num::SubString)
-    chopped, num = chopprefixes(num, "ror:")
+    chopped, num = lchopfolded(num, "ror:")
     if !chopped
-        _, num = chopprefixes(num, "ror.org/", "https://ror.org/")
+        _, num = lchopfolded(num, "ror.org/", "https://ror.org/")
     end
     length(num) == 9 || return MalformedIdentifier{ROR}(num, "must be 9 characters long")
     char0, rest... = num
@@ -913,9 +714,9 @@ struct PMID <: AcademicIdentifier
 end
 
 function parseid(::Type{PMID}, id::SubString)
-    chopped, id = chopprefixes(id, "pmid:")
+    chopped, id = lchopfolded(id, "pmid:")
     if !chopped
-        _, id = chopprefixes(id, "https://", "http://", "pubmed.ncbi.nlm.nih.gov/")
+        _, id = lchopfolded(id, "https://", "http://", "pubmed.ncbi.nlm.nih.gov/")
     end
     pint = parsefor(PMID, UInt, id)
     pint isa UInt || return pint
@@ -964,9 +765,9 @@ struct PMCID <: AcademicIdentifier
 end
 
 function parseid(::Type{PMCID}, id::SubString)
-    chopped, id = chopprefixes(id, "pmcid:", "pmc")
+    chopped, id = lchopfolded(id, "pmcid:", "pmc")
     if !chopped
-        _, id = chopprefixes(id, "https://", "http://", "www.ncbi.nlm.nih.gov/pmc/articles/")
+        _, id = lchopfolded(id, "https://", "http://", "www.ncbi.nlm.nih.gov/pmc/articles/")
     end
     pint = parsefor(PMCID, UInt, id)
     pint isa UInt || return pint
@@ -1010,7 +811,7 @@ struct ISNI <: AcademicIdentifier
         ndigits(id) <= 15 || throw(MalformedIdentifier{ISNI}(id, "must be a 15-digit integer"))
         i7064check = iso7064mod11m2checksum(id)
         i7064check == checksum ||
-            throw(ChecksumViolation{ISNI}(id, checksum, i7064check))
+            throw(ChecksumViolation{ISNI}(id, i7064check, checksum))
         code = UInt64(id) + UInt64(checksum) << 60
         new(code)
     end
@@ -1018,9 +819,9 @@ end
 
 function parseid(::Type{ISNI}, id::SubString)
     if !digitstart(id)
-        chopped, id = chopprefixes(id, "isni:", "isni ")
+        chopped, id = lchopfolded(id, "isni:", "isni ")
         if !chopped
-            _, id = chopprefixes(id, "https://", "http://", "www.",
+            _, id = lchopfolded(id, "https://", "http://", "www.",
                                  "isni.org/isni/", "isni.org/", "isni",
                                  "viaf.org/viaf/sourceID/ISNI%7C", "viaf.org/processed/ISNI%7C")
         end
@@ -1086,7 +887,7 @@ struct ISSN <: AcademicIdentifier
         end
         checkcalc = (11 - digsum % 11) % 11
         if checkcalc != checksum
-            throw(ChecksumViolation{ISSN}(id, checksum, checkcalc))
+            throw(ChecksumViolation{ISSN}(id, checkcalc, checksum))
         end
         code = UInt32(id) + UInt32(checksum) << 24
         new(code)
@@ -1094,11 +895,11 @@ struct ISSN <: AcademicIdentifier
 end
 
 function parseid(::Type{ISSN}, code::SubString)
-    chopped, code = chopprefixes(code, "issn:", "issn")
+    chopped, code = lchopfolded(code, "issn:", "issn")
     if chopped
         code = lstrip(code)
     else
-        _, code = chopprefixes(code, "https://", "http://", "portal.issn.org/resource/ISSN/")
+        _, code = lchopfolded(code, "https://", "http://", "portal.issn.org/resource/ISSN/")
     end
     issndigits = replace(code, '-' => "")
     2 <= length(issndigits) <= 8 ||
@@ -1161,7 +962,7 @@ struct EAN13 <: AcademicIdentifier
         end
         checkcalc = (10 - digsum % 10) % 10
         if checkcalc != checksum
-            throw(ChecksumViolation{EAN13}(code, checksum, checkcalc))
+            throw(ChecksumViolation{EAN13}(code, checkcalc, checksum))
         end
         new(code * 10 + checksum)
     end
@@ -1231,7 +1032,7 @@ function ISBN(code::Integer)
 end
 
 function parseid(::Type{ISBN}, code::SubString)
-    _, code = chopprefixes(code, "isbn:", "isbn")
+    _, code = lchopfolded(code, "isbn:", "isbn")
     code = lstrip(code)
     plaincode = replace(code, '-' => "", ' ' => "")
     if length(plaincode) == 13
@@ -1249,9 +1050,8 @@ function parseid(::Type{ISBN}, code::SubString)
         cdigit = 11 - mod1(csum, 11)
         checknum = if check == 'X' 0x0a else parsefor(ISBN, UInt8, check) end
         checknum isa UInt8 || return checknum
-        if cdigit != checknum
-            return ChecksumViolation{ISBN}(code, checknum, cdigit)
-        end
+        cdigit == checknum ||
+            return ChecksumViolation{ISBN}(code, cdigit, checknum)
         eansum = 0
         for (i, dig) in enumerate(digits(dcode, pad=12))
             eansum += if i % 2 == 0 dig else dig * 3 end
@@ -1392,9 +1192,9 @@ struct VIAF <: AcademicIdentifier
 end
 
 function parseid(::Type{VIAF}, id::AbstractString)
-    chopped, id = chopprefixes(id, "viaf:")
+    chopped, id = lchopfolded(id, "viaf:")
     if !chopped
-        _, id = chopprefixes(id, "https://", "http://", "viaf.org/viaf/")
+        _, id = lchopfolded(id, "https://", "http://", "viaf.org/viaf/")
     end
     all(isdigit, id) ||
         return MalformedIdentifier{VIAF}(id, "must contain only digits")
@@ -1431,9 +1231,9 @@ struct Wikidata <: AcademicIdentifier
 end
 
 function parseid(::Type{Wikidata}, id::SubString)
-    chopped, id = chopprefixes(id, "wikidata:", "wd:")
+    chopped, id = lchopfolded(id, "wikidata:", "wd:")
     if !chopped
-        _, id = chopprefixes(id, "https://", "http://", "www.", "wikidata.org/wiki/")
+        _, id = lchopfolded(id, "https://", "http://", "www.", "wikidata.org/wiki/")
     end
     if startswith(id, 'Q')
         wint = parsefor(Wikidata, UInt64, id[2:end])
