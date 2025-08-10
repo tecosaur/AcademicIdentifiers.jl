@@ -6,6 +6,9 @@ authors = ["TEC <contact@tecosaur.net>"]
 [deps]
 DigitalIdentifiersBase = "4753c187-0528-4cab-a788-b8a80107dae0"
 
+[sources]
+DigitalIdentifiersBase = {rev = "main", url = "https://code.tecosaur.net/tec/DigitalIdentifiersBase.jl.git"}
+
 [compat]
 DigitalIdentifiersBase = "1"
 julia = "1.9"
