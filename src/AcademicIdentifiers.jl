@@ -240,20 +240,24 @@ function arxiv_old(id::AbstractString)
     ArXiv(arxiv_meta(archiveidx % UInt8, classidx % UInt8, year, month, version), num)
 end
 
-function shortcode(arxiv::ArXiv)
+function shortcode(io::IO, arxiv::ArXiv)
     archid, classid = arxiv_archive(arxiv), arxiv_class(arxiv)
+    if !iszero(archid) # Old form
+        print(io, ARXIV_OLD_ARCHIVES[archid])
+        if !iszero(classid)
+            print(io, '.', ARXIV_OLD_CLASSES[archid][classid])
+        end
+        print(io, '/')
+    end
     year, month, ver = arxiv_year(arxiv), arxiv_month(arxiv), arxiv_version(arxiv)
-    verstr = if ver > 0 string('v', ver) else "" end
+    print(io, lpad(year, 2, '0'), lpad(month, 2, '0'))
     if iszero(archid) # New form
-        string(lpad(year, 2, '0'), lpad(month, 2, '0'),
-               '.', lpad(arxiv.number, ifelse(year >= 15, 5, 4), '0'),
-               verstr)
+        print(io, '.', lpad(arxiv.number, ifelse(year >= 15, 5, 4), '0'))
     else # Old form
-        archive = ARXIV_OLD_ARCHIVES[archid]
-        class = if iszero(classid) "" else ARXIV_OLD_CLASSES[archid][classid] end
-        string(archive, ifelse(iszero(classid), "", "."), class, '/',
-               lpad(year, 2, '0'), lpad(month, 2, '0'), lpad(arxiv.number, 3, '0'),
-               verstr)
+        print(io, lpad(arxiv.number, 3, '0'))
+    end
+    if ver > 0
+        print(io, 'v', ver)
     end
 end
 
@@ -264,7 +268,11 @@ idcode(arxiv::ArXiv) =
 
 purlprefix(::Type{ArXiv}) = "https://arxiv.org/abs/"
 
-Base.print(io::IO, arxiv::ArXiv) = print(io, "arXiv:", shortcode(arxiv))
+function Base.print(io::IO, arxiv::ArXiv)
+    get(io, :limit, false) === true && get(io, :compact, false) === true ||
+        print(io, "arXiv:")
+    shortcode(io, arxiv)
+end
 
 
 # DOI
@@ -325,9 +333,9 @@ end
 parseid(::Type{DOI}, doi::SubString) = parseid(DOI, SubString(String(doi)))
 
 purlprefix(::Type{DOI}) = "https://doi.org/"
-shortcode(doi::DOI) = doi.registrant * '/' * doi.object
+shortcode(io::IO, doi::DOI) = print(io, doi.registrant, '/', doi.object)
 
-Base.print(io::IO, doi::DOI) = print(io, "doi:", shortcode(doi))
+Base.print(io::IO, doi::DOI) = (print(io, "doi:"); shortcode(io, doi))
 Base.show(io::IO, doi::DOI) = (show(io, DOI); show(io, (doi.registrant, doi.object)))
 
 function Base.:(==)(a::DOI, b::DOI)
@@ -394,7 +402,6 @@ function parseid(::Type{OCN}, id::SubString)
     OCN(num)
 end
 
-idcode(ocn::OCN) = ocn.id
 purlprefix(::Type{OCN}) = "https://worldcat.org/oclc/"
 
 function Base.print(io::IO, ocn::OCN)
@@ -465,15 +472,14 @@ end
 idcode(orcid::ORCID) = Int(orcid.id & 0x003fffffffffffff)
 idchecksum(orcid::ORCID) = (orcid.id >> 60) % UInt8
 
-function shortcode(orcid::ORCID)
+function shortcode(io::IO, orcid::ORCID)
     idstr, check = string(idcode(orcid)), idchecksum(orcid)
-    join(Iterators.partition(lpad(idstr, 15, '0'), 4), '-') *
-        if check == 10 "X" else string(check) end
+    join(io, Iterators.partition(lpad(idstr, 15, '0'), 4), '-')
+    print(io, '0' + ifelse(check == 0xa, 0x28, check))
 end
 
 purlprefix(::Type{ORCID}) = "https://orcid.org/"
 Base.show(io::IO, orcid::ORCID) = (show(io, ORCID); show(io, (idcode(orcid), idchecksum(orcid))))
-Base.print(io::IO, orcid::ORCID) = print(io, "ORCID:", shortcode(orcid))
 
 
 # OpenAlex
@@ -554,11 +560,8 @@ function parseid(::Type{OpenAlexID}, id::SubString)
     OpenAlexID{Symbol(kindchar)}(num)
 end
 
-shortcode(id::OpenAlexID{kind}) where {kind} = string(kind, id.num)
+shortcode(io::IO, id::OpenAlexID{kind}) where {kind} = print(io, kind, id.num)
 purlprefix(@nospecialize(::OpenAlexID)) = "https://openalex.org/"
-
-Base.show(io::IO, id::OpenAlexID) = (show(io, typeof(id)); print(io, '(', id.num, ')'))
-Base.print(io::IO, id::OpenAlexID) = print(io, shortcode(id))
 
 
 # RAiD
@@ -602,7 +605,6 @@ function parseid(::Type{RAiD}, id::SubString)
 end
 
 purlprefix(::Type{RAiD}) = "https://raid.org/"
-shortcode(raid::RAiD) = shortcode(raid.id)
 
 Base.:(==)(a::RAiD, b::RAiD) = a.id == b.id
 Base.hash(raid::RAiD, h::UInt) = hash(raid.id, h)
@@ -675,7 +677,7 @@ end
 
 idcode(ror::ROR) = ror.num
 idchecksum(ror::ROR) = 98 - ((ror.num * 100) % 97)
-shortcode(ror::ROR) = '0' * lpad(croc32encode(ror.num), 6, '0') * lpad(string(idchecksum(ror)), 2, '0')
+shortcode(io::IO, ror::ROR) = print(io, '0', lpad(croc32encode(ror.num), 6, '0'), lpad(string(idchecksum(ror)), 2, '0'))
 purlprefix(::Type{ROR}) = "https://ror.org/"
 
 
@@ -723,11 +725,13 @@ function parseid(::Type{PMID}, id::SubString)
     try PMID(pint) catch e; e end
 end
 
-idcode(pmid::PMID) = pmid.id
 purlprefix(::Type{PMID}) = "https://pubmed.ncbi.nlm.nih.gov/"
 
-Base.show(io::IO, pmid::PMID) = (show(io, PMID); print(io, '(', pmid.id, ')'))
-Base.print(io::IO, pmid::PMID) = print(io, "PMID:", pmid.id)
+function Base.print(io::IO, pmid::PMID)
+    get(io, :limit, false) === true && get(io, :compact, false) === true ||
+        print(io, "PMID:")
+    print(io, pmid.id)
+end
 
 
 # PMCID
@@ -774,11 +778,9 @@ function parseid(::Type{PMCID}, id::SubString)
     try PMCID(pint) catch e; e end
 end
 
-idcode(pmcid::PMCID) = pmcid.id
-shortcode(pmcid::PMCID) = string("PMC", pmcid.id)
+shortcode(io::IO, pmcid::PMCID) = print(io, "PMC", pmcid.id)
 purlprefix(::Type{PMCID}) = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
 
-Base.show(io::IO, pmcid::PMCID) = (show(io, PMCID); print(io, '(', pmcid.id, ')'))
 Base.print(io::IO, pmcid::PMCID) = print(io, "PMC", pmcid.id)
 
 
@@ -840,10 +842,10 @@ end
 idcode(isni::ISNI) = Int(isni.code & 0x003fffffffffffff)
 idchecksum(isni::ISNI) = (isni.code >> 60) % UInt8
 
-function shortcode(isni::ISNI)
+function shortcode(io::IO, isni::ISNI)
     idstr, check = string(idcode(isni)), idchecksum(isni)
-    join(Iterators.partition(lpad(idstr, 15, '0'), 4), ' ') *
-        if check == 10 "X" else string(check) end
+    join(io, Iterators.partition(lpad(idstr, 15, '0'), 4), ' ')
+    print(io, '0' + ifelse(check == 0xa, 0x28, check))
 end
 
 purl(isni::ISNI) = string(
@@ -914,14 +916,18 @@ end
 
 idcode(issn::ISSN) = Int(issn.code & 0x00ffffff)
 idchecksum(issn::ISSN) = Int8((issn.code & 0xff000000) >> 24)
-function shortcode(issn::ISSN)
-    code = join(Iterators.partition(lpad(string(idcode(issn)), 7, '0'), 4), '-')
+function shortcode(io::IO, issn::ISSN)
+    join(io, Iterators.partition(lpad(string(idcode(issn)), 7, '0'), 4), '-')
     csum = idchecksum(issn)
-    code * if csum == 10 "X" else string(csum) end
+    print(io, '0' + ifelse(csum == 0xa, 0x28, csum))
 end
 purlprefix(::Type{ISSN}) = "https://portal.issn.org/resource/ISSN/"
 
-Base.print(io::IO, issn::ISSN) = print(io, "ISSN ", shortcode(issn))
+function Base.print(io::IO, issn::ISSN)
+    get(io, :limit, false) === true && get(io, :compact, false) === true ||
+        print(io, "ISSN ")
+    shortcode(io, issn)
+end
 
 
 # EAN13
@@ -989,7 +995,7 @@ end
 
 idcode(ean::EAN13) = Int((0x00001fffffffffff & ean.code) ÷ 10)
 idchecksum(ean::EAN13) = Int8(ean.code % 10)
-shortcode(ean::EAN13) = string(lpad(idcode(ean), 12, '0'), idchecksum(ean))
+shortcode(io::IO, ean::EAN13) = print(io, lpad(idcode(ean), 12, '0'), idchecksum(ean))
 
 const IAN = EAN13
 
@@ -1024,6 +1030,13 @@ struct ISBN <: AcademicIdentifier
 end
 
 Base.convert(::Type{EAN13}, isbn::ISBN) = isbn.code
+
+function Base.convert(::Type{ISBN}, ean::EAN13)
+    if idcode(ean) ÷ 10^9 ∉ (978, 979)
+        return MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979")
+    end
+    ISBN(ean)
+end
 
 function ISBN(code::Integer)
     ndigits(code) == 13 || throw(MalformedIdentifier{ISBN}(code, "must be a 13-digit integer"))
@@ -1065,23 +1078,20 @@ end
 
 idcode(isbn::ISBN) = idcode(isbn.code)
 idchecksum(isbn::ISBN) = idchecksum(isbn.code)
-shortcode(isbn::ISBN) = string(isbn)
 
-function Base.convert(::Type{ISBN}, ean::EAN13)
-    if idcode(ean) ÷ 10^9 ∉ (978, 979)
-        return MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979")
-    end
-    ISBN(ean)
-end
-
-function Base.print(io::IO, isbn::ISBN)
+function shortcode(io::IO, isbn::ISBN)
     (; prefix, group, publisher, title, check) = isbn_hyphenate(isbn)
-    print(io, "ISBN ")
     isempty(prefix) || print(io, prefix, '-')
     isempty(group) || print(io, group, '-')
     isempty(publisher) || print(io, publisher, '-')
     isempty(title) || print(io, title, '-')
     print(io, check)
+end
+
+function Base.print(io::IO, isbn::ISBN)
+    get(io, :limit, false) === true && get(io, :compact, false) === true ||
+        print(io, "ISBN ")
+    shortcode(io, isbn)
 end
 
 function isbn_hyphenate(isbn::ISBN)
@@ -1155,11 +1165,7 @@ function isbn_hyphenate(isbn::ISBN)
          Char(0x30 + check_digit)
      else
          check_char = Int8(flag & 0x00ff)
-         if check_char == 10
-             'X'
-         else
-             Char(0x30 + check_char)
-         end
+         '0' + ifelse(check_char == 0xa, 0x28, check_char)
      end)
 end
 
@@ -1203,8 +1209,6 @@ function parseid(::Type{VIAF}, id::AbstractString)
     VIAF(vid)
 end
 
-idcode(viaf::VIAF) = viaf.id
-
 purlprefix(::Type{VIAF}) = "https://viaf.org/viaf/"
 
 
@@ -1244,10 +1248,7 @@ function parseid(::Type{Wikidata}, id::SubString)
     end
 end
 
-idcode(wd::Wikidata) = wd.id
-shortcode(wd::Wikidata) = string('Q', wd.id)
+shortcode(io::IO, wd::Wikidata) = print(io, 'Q', wd.id)
 purlprefix(::Type{Wikidata}) = "https://www.wikidata.org/wiki/"
-
-Base.show(io::IO, wd::Wikidata) = (show(io, Wikidata); print(io, '(', wd.id, ')'))
 
 end

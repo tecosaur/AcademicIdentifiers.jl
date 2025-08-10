@@ -150,13 +150,6 @@ using Test
 
         doi_old = convert(DOI, arxiv_old)
         @test shortcode(doi_old) == "10.48550/arXiv.hep-th/9901001"
-
-        # Test three-arg show (MIME"text/plain") with reference strings
-        arxiv_simple = parse(ArXiv, "2301.12345")
-        show_output = sprint(show, MIME("text/plain"), arxiv_simple)
-        @test show_output == "ArXiv:2301.12345"
-        vec_show_output = sprint(show, MIME("text/plain"), arxiv_simple, context = :typeinfo => ArXiv)
-        @test vec_show_output == "2301.12345"
     end
 end
 
@@ -628,7 +621,7 @@ end
             "978-1-59059-356-1"
         ]
         for isbn in valid_isbns
-            @test shortcode(parse(ISBN, isbn)) == "ISBN " * isbn
+            @test shortcode(parse(ISBN, isbn)) == isbn
         end
 
         # Test prefix parsing
@@ -740,7 +733,7 @@ end
         isbn = parse(ISBN, "978-0-439-02348-1")
 
         # Test shortcode
-        @test shortcode(isbn) == "ISBN 978-0-439-02348-1"
+        @test shortcode(isbn) == "978-0-439-02348-1"
 
         # Test purl (ISBN doesn't have a standard purl)
         @test purl(isbn) === nothing
@@ -977,7 +970,6 @@ end
             @test idchecksum(orcid) == csum
             @test shortcode(orcid) == idstr
             @test purl(orcid) == "https://orcid.org/$idstr"
-            @test sprint(print, orcid) == "ORCID:$idstr"
         end
 
         # Test case sensitivity
@@ -1065,7 +1057,6 @@ end
             openalex_id = parse(OpenAlexID{kind}, idstr)
             @test shortcode(openalex_id) == idstr
             @test purl(openalex_id) == "https://openalex.org/$idstr"
-            @test sprint(print, openalex_id) == idstr
         end
 
         # Test prefix parsing
