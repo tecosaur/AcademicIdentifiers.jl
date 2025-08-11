@@ -1,0 +1,6 @@
+[deps]
+AcademicIdentifiers = "73aec6e9-1368-4429-b03d-50b89ba0733e"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+
+[sources]
+AcademicIdentifiers = {path = ".."}
