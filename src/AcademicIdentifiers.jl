@@ -47,7 +47,7 @@ julia> shortcode(orcid)
 module AcademicIdentifiers
 
 using DigitalIdentifiersBase
-import DigitalIdentifiersBase: idcode, idchecksum, shortcode, purl, purlprefix, parseid, parsefor, lchopfolded
+import DigitalIdentifiersBase: idcode, idchecksum, shortcode, purl, purlprefix, parseid, parsefor, lchopfolded, unsafe_substr
 
 export AcademicIdentifier, ArXiv, DOI, ISNI, ISSN, ISBN, OCN, ORCID, OpenAlexID, RAiD, ROR, PMID, PMCID, VIAF, Wikidata
 DigitalIdentifiersBase.@reexport
@@ -67,7 +67,7 @@ See also: `AbstractIdentifier`.
 """
 abstract type AcademicIdentifier <: AbstractIdentifier end
 
-digitstart(s::AbstractString) = !isempty(s) && isdigit(first(s))
+digitstart(s::AbstractString) = !isempty(s) && codeunit(s, 1) ∈ 0x30:0x39
 
 function iso7064mod11m2checksum(num::Integer)
     digsum = 0
@@ -76,6 +76,33 @@ function iso7064mod11m2checksum(num::Integer)
     end
     (12 - digsum % 11) % 11
 end
+
+function parsedashcode(::Type{I}, str::AbstractString, skip::NTuple{N, Char}) where {I <: Integer, N}
+    isempty(str) && return nothing
+    sbytes = map(UInt8, skip)
+    i, ndigits, num = 1, 0, zero(UInt64)
+    @inbounds while i < ncodeunits(str)
+        b = codeunit(str, i)
+        if b ∈ 0x30:0x39
+            num = muladd(num, 10, b - 0x30)
+            ndigits += 1
+        elseif b ∈ sbytes
+        else
+            return nothing
+        end
+        i += 1
+    end
+    lastdigit = codeunit(str, ncodeunits(str))
+    check = if lastdigit | 0x20 == UInt8('x')
+        0x0a
+    else
+        lastdigit - 0x30
+    end
+    (; num, ndigits, check)
+end
+
+parsedashcode(T::Type{<:Integer}, num::AbstractString, skip::Char) =
+    parsedashcode(T, num, (skip,))
 
  
 # ArXiv
@@ -128,7 +155,7 @@ function parseid(::Type{ArXiv}, id::SubString)
     if isweb
         prefixend = findfirst('/', id)
         isnothing(prefixend) && return MalformedIdentifier{ArXiv}(id, "incomplete ArXiv URL")
-        id = @view id[prefixend+1:end]
+        id = unsafe_substr(id, prefixend)
     else
         _, id = lchopfolded(id, "arxiv:")
     end
@@ -139,7 +166,7 @@ function parseid(::Type{ArXiv}, id::SubString)
     end
 end
 
-arxiv_meta(archive::UInt8, class::UInt8, year::UInt8, month::UInt8, version::UInt8) =
+arxiv_meta(archive::UInt8, class::UInt8, year::UInt8, month::UInt8, version::UInt16) =
     UInt32(archive) << (32 - 5) +
     UInt32(class) << (32 - 11) +
     UInt32(year) << (32 - 18) +
@@ -150,26 +177,44 @@ arxiv_archive(arxiv::ArXiv) = (arxiv.meta >> (32 - 5)) % UInt8
 arxiv_class(arxiv::ArXiv) = 0x3f & (arxiv.meta >> (32 - 11)) % UInt8
 arxiv_year(arxiv::ArXiv) = 0x7f & (arxiv.meta >> (32 - 18)) % UInt8
 arxiv_month(arxiv::ArXiv) = 0x0f & (arxiv.meta >> (32 - 22)) % UInt8
-arxiv_version(arxiv::ArXiv) = arxiv.meta % UInt8
+arxiv_version(arxiv::ArXiv) = arxiv.meta % UInt16 & 0x03ff
 
 function arxiv_new(id::AbstractString)
-    code, verstr = if 'v' in id
-        split(id, 'v', limit=2)
-    else
-        id, "0"
+    ncodeunits(id) >= 6 || return MalformedIdentifier{ArXiv}(id, "is too short to be a valid ArXiv identifier")
+    bytes = codeunits(id)
+    bdigit(b::UInt8) = b ∈ 0x30:0x39
+    local year, month
+    y1, y2, m1, m2 = @inbounds bytes[1], bytes[2], bytes[3], bytes[4]
+    all(bdigit, (y1, y2)) || return MalformedIdentifier{ArXiv}(id, "year component (YYmm.nnnnn) must be an integer")
+    all(bdigit, (m1, m2)) || return MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be an integer")
+    year = 0xa * (y1 - 0x30) + (y2 - 0x30)
+    month = 0xa * (m1 - 0x30) + (m2 - 0x30)
+    month ∈ 1:12 || return MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be between 01 and 12")
+    (@inbounds bytes[5]) == UInt8('.') || return MalformedIdentifier{ArXiv}(id, "must contain a period separating the date and number component (yymm.nnnnn)")
+    i, number, version = 6, zero(UInt32), zero(UInt16)
+    @inbounds while i <= ncodeunits(id)
+        b = bytes[i]
+        i += 1
+        if (b | 0x20) == UInt8('v')
+            i > ncodeunits(id) && return MalformedIdentifier{ArXiv}(id, "version component must be non-empty")
+            break
+        elseif bdigit(b)
+            number = muladd(number, UInt32(10), b - 0x30)
+        else
+            return MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must be an integer")
+        end
     end
-    version = tryparse(UInt8, verstr)
-    isnothing(version) && return MalformedIdentifier{ArXiv}(id, "version must be an integer")
-    '.' in code || return MalformedIdentifier{ArXiv}(id, "must contain a period separating the date and number component (YYMM.NNNNN)")
-    datestr, numstr = split(code, '.', limit=2)
-    all(isdigit, datestr) && ncodeunits(datestr) == 4 || return MalformedIdentifier{ArXiv}(id, "date component must be 4 digits (YYMM.nnnnn)")
-    year = tryparse(UInt8, @view datestr[1:2])
-    isnothing(year) && return MalformedIdentifier{ArXiv}(id, "year component (YYmm.nnnnn) must be an integer")
-    month = tryparse(UInt8, @view datestr[3:4])
-    isnothing(month) && return MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be an integer")
-    1 <= month <= 12 || return MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be between 01 and 12")
-    number = tryparse(UInt32, numstr)
-    isnothing(number) && return MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must be an integer")
+    number <= UInt32(99999) || return MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must no more than 5 digits")
+    @inbounds while i <= ncodeunits(id)
+        b = bytes[i]
+        if bdigit(b)
+            version = muladd(version, UInt8(10), b - 0x30)
+            iszero(version & ~0x03ff) || return MalformedIdentifier{ArXiv}(id, "version is larger than the maximum supported value (1023)")
+        else
+            return MalformedIdentifier{ArXiv}(id, "version component must be an integer")
+        end
+        i += 1
+    end
     ArXiv(arxiv_meta(0x00, 0x00, year, month, version), number)
 end
 
@@ -205,13 +250,14 @@ const ARXIV_OLD_ARCHIVES, ARXIV_OLD_CLASSES = let
 end
 
 function arxiv_old(id::AbstractString)
-    '/' in id || return MalformedIdentifier{ArXiv}(id, "must contain a slash separating the components (archive.class/YYMMNNN)")
-    archclass, numverstr = split(id, '/', limit=2)
-    archive, class = if '.' in archclass
-        archive, class = split(archclass, '.', limit=2)
-    else
-        archclass, ""
-    end
+    bytes = codeunits(id)
+    slashpos = @something(findfirst(==(UInt8('/')), bytes),
+                          return MalformedIdentifier{ArXiv}(id, "must contain a slash separating the components (archive.class/YYMMNNN)"))
+    archclass = unsafe_substr(id, 0, slashpos - 1)
+    numverstr = unsafe_substr(id, slashpos)
+    dotpos = something(findfirst(==(UInt8('.')), view(bytes, 1:slashpos)), slashpos)
+    archive = unsafe_substr(archclass, 0, dotpos - 1)
+    class = unsafe_substr(archclass, dotpos, max(0, slashpos - dotpos - 1))
     archiveidx = findfirst(==(archive), ARXIV_OLD_ARCHIVES)
     isnothing(archiveidx) && return MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive name")
     classidx = if isempty(class)
@@ -221,23 +267,44 @@ function arxiv_old(id::AbstractString)
     end
     isnothing(classidx) && return MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive class")
     length(class) ∈ (0, 2) || return MalformedIdentifier{ArXiv}(id, "class component must be 2 characters")
-    numstr, verstr = if 'v' in numverstr
-        split(numverstr, 'v', limit=2)
-    else
-        numverstr, "0"
-    end
-    version = tryparse(UInt8, verstr)
-    isnothing(version) && return MalformedIdentifier{ArXiv}(id, "version must be an integer")
-    length(numstr) == 7 || return MalformedIdentifier{ArXiv}(id, "number component must be 7 characters (YYMMNNN)")
-    year = tryparse(UInt8, @view numstr[1:nextind(numstr, 1)])
-    isnothing(year) && return MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be an integer")
+    #--
+    ncodeunits(numverstr) >= 5 || return MalformedIdentifier{ArXiv}(id, "is too short to be a valid ArXiv identifier")
+    bytes = codeunits(numverstr)
+    bdigit(b::UInt8) = b ∈ 0x30:0x39
+    local year, month
+    y1, y2, m1, m2 = @inbounds bytes[1], bytes[2], bytes[3], bytes[4]
+    all(bdigit, (y1, y2)) || return MalformedIdentifier{ArXiv}(id, "year component (YYmmnnnn) must be an integer")
+    all(bdigit, (m1, m2)) || return MalformedIdentifier{ArXiv}(id, "month component (yyMMnnnn) must be an integer")
+    year = 0xa * (y1 - 0x30) + (y2 - 0x30)
+    month = 0xa * (m1 - 0x30) + (m2 - 0x30)
     (year >= 91 || year <= 7) || return MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be between 91 and 07")
-    month = tryparse(UInt8, @view numstr[3:nextind(numstr, 3)])
-    isnothing(month) && return MalformedIdentifier{ArXiv}(id, "month component (yyMMnnn) must be an integer")
-    1 <= month <= 12 || return MalformedIdentifier{ArXiv}(id, "month component (yyMMnnn) must be between 01 and 12")
-    num = tryparse(UInt16, @view numstr[5:nextind(numstr, 5, 2)])
-    isnothing(num) && return MalformedIdentifier{ArXiv}(id, "number component (yymmNNN) must be an integer")
-    ArXiv(arxiv_meta(archiveidx % UInt8, classidx % UInt8, year, month, version), num)
+    month ∈ 1:12 || return MalformedIdentifier{ArXiv}(id, "month component (yyMMnnnn) must be between 01 and 12")
+    i, number, version = 5, zero(UInt32), zero(UInt16)
+    @inbounds while i <= ncodeunits(numverstr)
+        b = bytes[i]
+        i += 1
+        if (b | 0x20) == UInt8('v')
+            i > ncodeunits(id) && return MalformedIdentifier{ArXiv}(id, "version component must be non-empty")
+            break
+        elseif bdigit(b)
+            number = muladd(number, UInt32(10), b - 0x30)
+        else
+            return MalformedIdentifier{ArXiv}(id, "number component (yymmNNNN) must be an integer")
+        end
+    end
+    number <= UInt32(9999) || return MalformedIdentifier{ArXiv}(id, "number component (yymmNNNN) must no more than 4 digits")
+    @inbounds while i <= ncodeunits(numverstr)
+        b = bytes[i]
+        if bdigit(b)
+            version = muladd(version, UInt8(10), b - 0x30)
+            iszero(version & ~0x03ff) || return MalformedIdentifier{ArXiv}(id, "version is larger than the maximum supported value (1023)")
+        else
+            return MalformedIdentifier{ArXiv}(id, "version component must be an integer")
+        end
+        i += 1
+    end
+    #--
+    ArXiv(arxiv_meta(archiveidx % UInt8, classidx % UInt8, year, month, version), number)
 end
 
 function shortcode(io::IO, arxiv::ArXiv)
@@ -315,10 +382,7 @@ end
 
 function parseid(::Type{DOI}, doi::SubString{String})
     if !digitstart(doi)
-        chopped, doi = lchopfolded(doi, "doi:")
-        if !chopped
-            _, doi = lchopfolded(doi, "https://", "http://", "dx.doi.org/", "doi.org/")
-        end
+        _, doi = lchopfolded(doi, "doi:", "https://", "http://", "dx.doi.org/", "doi.org/")
     end
     registrant, object = if '/' in doi
         split(doi, '/', limit=2)
@@ -401,7 +465,7 @@ function parseid(::Type{OCN}, id::SubString)
     if first(id) == '('
         _, id = lchopfolded(id, "(ocolc)")
     end
-    if !isempty(id) && !isdigit(first(id))
+    if !digitstart(id)
         _, id = lchopfolded(id, "ocn:", "oclc:", "ocolc", "oclc", "ocm", "ocn", "on", "https://", "www.", "worldcat.org/oclc/")
     end
     id = lstrip(id)
@@ -461,20 +525,13 @@ end
 
 function parseid(::Type{ORCID}, id::SubString)
     if !digitstart(id)
-        chopped, id = lchopfolded(id, "orcid:", "orcid ")
-        if !chopped
-            _, id = lchopfolded(id, "https://", "http://", "orcid.org/")
-        end
+        _, id = lchopfolded(id, "orcid:", "orcid ", "https://", "http://", "orcid.org/")
     end
-    orcdigits = replace(id, '-' => "")
-    2 <= length(orcdigits) <= 16 ||
-        return MalformedIdentifier{ORCID}(id, "must be a 2-16 digit integer")
-    iddigits..., checksum = orcdigits
-    id = parsefor(ORCID, UInt64, iddigits)
-    id isa UInt64 || return id
-    check = if uppercase(checksum) == 'X' 0x0a else parsefor(ORCID, UInt8, checksum) end
-    check isa UInt8 || return check
-    try ORCID(id, check) catch e; e end
+    code = parsedashcode(UInt64, id, '-')
+    isnothing(code) && return MalformedIdentifier{ORCID}(id, "must only consist of digits and hyphens")
+    1 <= code.ndigits <= 15 ||
+        return MalformedIdentifier{ORCID}(id, "must be a 2-16 digit identifier")
+    try ORCID(code.num, code.check) catch e; e end
 end
 
 idcode(orcid::ORCID) = Int(orcid.id & 0x003fffffffffffff)
@@ -527,45 +584,41 @@ end
 
 function parseid(::Type{OpenAlexID{kind}}, id::SubString) where {kind}
     isempty(id) && return MalformedIdentifier{OpenAlexID{kind}}(id, "cannot be empty")
-    if first(id) ∈ (first(String(kind)), lowercase(first(String(kind))))
-    else
-        chopped, id = lchopfolded(id, "openalex:")
-        if !chopped
-            _, id = lchopfolded(id, "https://", "http://", "openalex.org/")
-        end
+    klower, kupper = codeunit(String(kind), 1) | 0x20, codeunit(String(kind), 1)
+    if codeunit(id, 1) ∉ (klower, kupper)
+        _, id = lchopfolded(id, "openalex:", "https://", "http://", "openalex.org/")
         prefixend = findfirst('/', id)
         if !isnothing(prefixend)
-            id = @view id[prefixend+1:end]
+            id = unsafe_substr(id, prefixend)
         end
-        uppercase(first(id)) == first(String(kind)) ||
+        isempty(id) && return MalformedIdentifier{OpenAlexID{kind}}(id, "must include a kind prefix")
+        codeunit(id, 1) | 0x20 == klower ||
             return MalformedIdentifier{OpenAlexID{kind}}(id, "kind does not match")
     end
-    num = parsefor(OpenAlexID, UInt64, @view id[2:end])
+    id = unsafe_substr(id, 1)
+    num = parsefor(OpenAlexID{kind}, UInt64, id)
     num isa UInt64 || return num
     OpenAlexID{kind}(num)
 end
 
 function parseid(::Type{OpenAlexID}, id::SubString)
     isempty(id) && return MalformedIdentifier{OpenAlexID}(id, "cannot be empty")
-    kindchar = uppercase(first(id))
-    if kindchar ∉ ('W', 'A', 'S', 'I', 'C', 'P', 'F')
-        chopped, id = lchopfolded(id, "openalex:")
-        if !chopped
-            _, id = lchopfolded(id, "https://", "http://", "openalex.org/")
-        end
+    kindchar = codeunit(id.string, 1) & ~0x20
+    if kindchar ∉ map(UInt8, ('W', 'A', 'S', 'I', 'C', 'P', 'F'))
+        _, id = lchopfolded(id, "openalex:", "https://", "http://", "openalex.org/")
         prefixend = findfirst('/', id)
         if !isnothing(prefixend)
-            id = @view id[prefixend+1:end]
+            id = unsafe_substr(id, prefixend)
         end
-        kindchar = uppercase(first(id))
-        first(id) ∈ ('W', 'A', 'S', 'I', 'C', 'P', 'F') ||
+        isempty(id) && return MalformedIdentifier{OpenAlexID}(id, "must include a kind prefix")
+        ncodeunits(id) == 1 && return MalformedIdentifier{OpenAlexID}(id, "must include a number after the kind prefix")
+        kindchar = codeunit(id, 1) & ~0x20
+        kindchar ∈ map(UInt8, ('W', 'A', 'S', 'I', 'C', 'P', 'F')) ||
             return MalformedIdentifier{OpenAlexID}(id, "unrecognised kind prefix")
-        ncodeunits(id) == 1 &&
-            return MalformedIdentifier{OpenAlexID}(id, "must include a number after the kind prefix")
     end
-    num = parsefor(OpenAlexID, UInt64, @view id[2:end])
+    num = parsefor(OpenAlexID, UInt64, unsafe_substr(id, 1))
     num isa UInt64 || return num
-    OpenAlexID{Symbol(kindchar)}(num)
+    OpenAlexID{Symbol(Char(kindchar & ~0x20))}(num)
 end
 
 shortcode(io::IO, id::OpenAlexID{kind}) where {kind} = print(io, kind, id.num)
@@ -727,10 +780,7 @@ struct PMID <: AcademicIdentifier
 end
 
 function parseid(::Type{PMID}, id::SubString)
-    chopped, id = lchopfolded(id, "pmid:")
-    if !chopped
-        _, id = lchopfolded(id, "https://", "http://", "www.", "pubmed.ncbi.nlm.nih.gov/")
-    end
+    _, id = lchopfolded(id, "pmid:", " ", "https://", "http://", "www.", "pubmed.ncbi.nlm.nih.gov/")
     pint = parsefor(PMID, UInt, id)
     pint isa UInt || return pint
     try PMID(pint) catch e; e end
@@ -780,10 +830,7 @@ struct PMCID <: AcademicIdentifier
 end
 
 function parseid(::Type{PMCID}, id::SubString)
-    chopped, id = lchopfolded(id, "pmcid:", "pmc")
-    if !chopped
-        _, id = lchopfolded(id, "https://", "http://", "www.", "ncbi.nlm.nih.gov/pmc/articles/", "pmc")
-    end
+    _, id = lchopfolded(id, "pmcid:", " ", "https://", "http://", "www.", "pmc.", "ncbi.nlm.nih.gov/pmc/articles/", "pmc")
     pint = parsefor(PMCID, UInt, id)
     pint isa UInt || return pint
     try PMCID(pint) catch e; e end
@@ -830,21 +877,21 @@ end
 function parseid(::Type{ISNI}, id::SubString)
     if !digitstart(id)
         chopped, id = lchopfolded(id, "isni:", "isni ")
-        if !chopped
+        if chopped
+            id = lstrip(id)
+        else
             _, id = lchopfolded(id, "https://", "http://", "www.",
-                                 "isni.org/isni/", "isni.org/", "isni",
-                                 "viaf.org/viaf/sourceID/ISNI%7C", "viaf.org/processed/ISNI%7C")
+                                "isni.org/isni/", "isni.org/", "isni",
+                                "viaf.org/viaf/sourceID/ISNI%7C", "viaf.org/processed/ISNI%7C")
         end
     end
-    isnidigits = replace(id, ' ' => "")
-    2 <= length(isnidigits) <= 16 ||
+    code = parsedashcode(UInt64, id, ' ')
+    isnothing(code) && return MalformedIdentifier{ISNI}(id, "must only consist of digits and spaces")
+    1 <= code.ndigits <= 15 ||
         return MalformedIdentifier{ISNI}(id, "must be a 2-16 character string")
-    iddigits..., checksum = isnidigits
-    id = parsefor(ISNI, UInt64, iddigits)
-    id isa UInt64 || return id
-    check = if uppercase(checksum) == 'X' 0x0a else parsefor(ISNI, UInt8, checksum) end
-    check isa UInt8 || return check
-    try ISNI(id, check) catch e; e end
+    code.check <= 0xa ||
+        return MalformedIdentifier{ISNI}(id, "check digit must be 0-9 or X")
+    try ISNI(code.num, code.check) catch e; e end
 end
 
 idcode(isni::ISNI) = Int(isni.code & 0x003fffffffffffff)
@@ -900,22 +947,20 @@ struct ISSN <: AcademicIdentifier
     end
 end
 
-function parseid(::Type{ISSN}, code::SubString)
-    chopped, code = lchopfolded(code, "issn:", "issn")
+function parseid(::Type{ISSN}, id::SubString)
+    chopped, id = lchopfolded(id, "issn:", "issn")
     if chopped
-        code = lstrip(code)
+        id = lstrip(id)
     else
-        _, code = lchopfolded(code, "https://", "http://", "portal.issn.org/resource/ISSN/")
+        _, id = lchopfolded(id, "https://", "http://", "portal.issn.org/resource/ISSN/")
     end
-    issndigits = replace(code, '-' => "")
-    2 <= length(issndigits) <= 8 ||
+    code = parsedashcode(UInt32, id, '-')
+    isnothing(code) && return MalformedIdentifier{ISSN}(id, "must only consist of digits and hyphens")
+    1 <= code.ndigits <= 7 ||
         return MalformedIdentifier{ISSN}(code, "must be a 2-8 digit integer")
-    iddigits..., checksum = issndigits
-    id = parsefor(ISSN, UInt32, iddigits)
-    id isa UInt32 || return id
-    check = if uppercase(checksum) == 'X' 0x0a else parsefor(ISSN, UInt8, checksum) end
-    check isa UInt8 || return check
-    try ISSN(id, check) catch e; e end
+    code.check <= 0xa ||
+        return MalformedIdentifier{ISSN}(id, "check digit must be 0-9 or X")
+    try ISSN(code.num, code.check) catch e; e end
 end
 
 idcode(issn::ISSN) = Int(issn.code & 0x00ffffff)
@@ -964,37 +1009,29 @@ ERROR: Checksum violation: the correct checksum for EAN13 identifier 97805965206
 """
 struct EAN13 <: AcademicIdentifier
     code::UInt64
-    function EAN13(code::Integer, checksum::Integer)
+    function EAN13(code::Integer)
         ndigits(code) <= 12 || throw(MalformedIdentifier{EAN13}(code, "must be a 12-digit integer"))
         digsum = 0
         for (i, dig) in enumerate(digits(code, pad=12))
             digsum += if i % 2 == 0 dig else dig * 3 end
         end
         checkcalc = (10 - digsum % 10) % 10
-        if checkcalc != checksum
-            throw(ChecksumViolation{EAN13}(code, checkcalc, checksum))
-        end
-        new(code * 10 + checksum)
+        new(10 * code + checkcalc)
     end
-    function EAN13(code::Integer, checksum::Integer, flag::UInt16)
-        ean = EAN13(code, checksum)
+    function EAN13((code, flag)::Tuple{<:Integer, UInt16})
+        ean = EAN13(code)
         new(ean.code | UInt64(flag) << 48)
     end
 end
 
-function EAN13(code::Integer)
-    idcode, checksum = divrem(code, 10)
-    EAN13(idcode, checksum)
-end
-
-function parseid(::Type{EAN13}, code::SubString)
-    digits = replace(code, '-' => "")
-    if length(digits) > 13
+function parseid(::Type{EAN13}, id::SubString)
+    code = parsedashcode(UInt64, id, '-')
+    isnothing(code) && return MalformedIdentifier{EAN13}(id, "must only consist of digits and hyphens")
+    code.ndigits > 13 &&
         return MalformedIdentifier{EAN13}(code, "must be a 13-digit integer")
-    end
-    eint = parsefor(EAN13, UInt64, digits)
-    eint isa UInt64 || return eint
-    try EAN13(eint) catch e; e end
+    code.check <= 0x9 ||
+        return MalformedIdentifier{EAN13}(id, "check digit must be 0-9")
+    try EAN13(code.num, code.check) catch e; e end
 end
 
 idcode(ean::EAN13) = Int((0x00001fffffffffff & ean.code) ÷ 10)
@@ -1041,41 +1078,40 @@ function Base.convert(::Type{ISBN}, ean::EAN13)
     ISBN(ean)
 end
 
-function ISBN(code::Integer)
-    ndigits(code) == 13 || throw(MalformedIdentifier{ISBN}(code, "must be a 13-digit integer"))
-    code ÷ 10^10 ∈ (978, 979) || throw(MalformedIdentifier{ISBN}(code, "must start with 978 or 979"))
-    ISBN(EAN13(code))
+function ISBN(id::Integer, check::Integer)
+    ndigits(id) == 12 || throw(MalformedIdentifier{ISBN}(id, "must be a 12-digit integer"))
+    id ÷ 10^9 ∈ (978, 979) || throw(MalformedIdentifier{ISBN}(id, "must start with 978 or 979"))
+    ISBN(EAN13(id, check))
 end
 
-function parseid(::Type{ISBN}, code::SubString)
-    _, code = lchopfolded(code, "isbn:", "isbn")
-    code = lstrip(code)
-    plaincode = replace(code, '-' => "", ' ' => "")
-    if length(plaincode) == 13
-        iint = parsefor(ISBN, UInt64, plaincode)
-        iint isa UInt64 || return iint
-        try ISBN(iint) catch e; e end
-    elseif length(plaincode) == 10
-        cdigits..., check = plaincode
-        dcode = parsefor(ISBN, UInt, cdigits)
-        dcode isa UInt || return dcode
+function ISBN(id::Integer)
+    ndigits(id) == 12 || throw(MalformedIdentifier{ISBN}(id, "must be a 12-digit integer"))
+    id ÷ 10^9 ∈ (978, 979) || throw(MalformedIdentifier{ISBN}(id, "must start with 978 or 979"))
+    ISBN(EAN13(id))
+end
+
+function parseid(::Type{ISBN}, id::SubString)
+    _, id = lchopfolded(id, "isbn:", "isbn")
+    ncode = sum(c -> c ∉ (UInt8(' '), UInt8('-')), codeunits(id), init=0)
+    if ncode == 13
+        code = parsedashcode(UInt64, id, ('-', ' '))
+        isnothing(code) && return MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens")
+        code.check <= 0x9 || return MalformedIdentifier{ISBN}(id, "check digit must be 0-9")
+        try ISBN(code.num, code.check) catch e; e end
+    elseif ncode == 10
+        code = parsedashcode(UInt64, id, ('-', ' '))
+        isnothing(code) && return MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens")
+        code.check <= 0xa || return MalformedIdentifier{ISBN}(id, "check digit must be 0-9 or X")
         csum = 0
-        for (i, digit) in enumerate(digits(dcode * 10, pad=10))
+        for (i, digit) in enumerate(digits(code.num * 10, pad=10))
             csum += i * digit
         end
-        cdigit = 11 - mod1(csum, 11)
-        checknum = if check == 'X' 0x0a else parsefor(ISBN, UInt8, check) end
-        checknum isa UInt8 || return checknum
-        cdigit == checknum ||
-            return ChecksumViolation{ISBN}(code, cdigit, checknum)
-        eansum = 0
-        for (i, dig) in enumerate(digits(dcode, pad=12))
-            eansum += if i % 2 == 0 dig else dig * 3 end
-        end
-        eancheck = (10 - eansum % 10) % 10
-        try ISBN(EAN13(dcode, eancheck, 0x1000 | UInt8(cdigit))) catch e; e end
+        cdigit = 0xb - mod1(csum, 0xb)
+        cdigit == code.check ||
+            return ChecksumViolation{ISBN}(id, cdigit, code.check)
+        try ISBN(EAN13((code.num, 0x1000 | UInt8(cdigit)))) catch e; e end
     else
-        return MalformedIdentifier{ISBN}(code, "must be a 10 or 13-digit integer")
+        return MalformedIdentifier{ISBN}(id, "must be a 10 or 13-digit integer")
     end
 end
 

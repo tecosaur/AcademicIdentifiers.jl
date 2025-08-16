@@ -17,7 +17,7 @@ using Test
         ("2312.12345", ArXiv(0x5f000, 12345)),
         # Versioned new format
         ("0704.0001v1", ArXiv(0x1d001, 1)),
-        ("2301.12345v9", ArXiv(0x5c409, 12345)),
+        ("2301.12345v389", ArXiv(0x5c585, 12345)),
         # Old format examples
         ("hep-th/9901001", ArXiv(0x5018c400, 1)),
         ("astro-ph/0001001", ArXiv(0x8000400, 1)),
@@ -84,7 +84,7 @@ using Test
             "2301.",             # Missing paper number
             ".12345",            # Missing year/month
             # Old scheme malformed
-            "astro-ph/001001",   # Wrong number length
+            "astro-ph/001",      # Wrong number length
             "bad-cat/0001001",   # Invalid category
             "astro-ph/000100a",  # Non-numeric number
             "astro-ph0001001",   # Missing slash
@@ -93,7 +93,7 @@ using Test
             "hep-th/8901001",    # Year too early (pre-1991)
             # Version malformed
             "2301.12345v",       # Missing version number
-            "2301.12345v999",    # Invalid version (too large)
+            "2301.12345v9999",   # Invalid version (too large)
             "2301.12345va",      # Non-numeric version
             # General malformed
             "",                  # Empty string
@@ -323,6 +323,7 @@ end
             "97804390234a12",   # Non-numeric in middle
             "a780439023481",    # Non-numeric at start
             "978 043 902 348 1", # Spaces
+            "978043902348-",    # Hyphen in place of checksum
             # Empty or invalid
             "",                 # Empty string
             "   ",              # Whitespace only
@@ -358,8 +359,7 @@ end
             # Short lengths that are interpreted as having wrong checksums
             "978043902",      # 9 digits - parsed as having wrong checksum
             "97804390234",    # 11 digits - parsed as having wrong checksum
-            "978043902348",   # 12 digits - parsed as having wrong checksum
-            "978043902348-"   # Hyphen interpreted as wrong checksum
+            "978043902348"    # 12 digits - parsed as having wrong checksum
         ]
 
         for bad_ean in checksum_examples
@@ -376,8 +376,8 @@ end
         @test idchecksum(ean13_int) == idchecksum(ean13_str)
         @test shortcode(ean13_int) == shortcode(ean13_str)
 
-        # Test integer constructor with full 13-digit code
-        ean13_full = EAN13(9780439023481)
+        # Test integer constructor with full code (no checksum)
+        ean13_full = EAN13(978043902348)
         @test shortcode(ean13_full) == "9780439023481"
 
         # Test another integer constructor
@@ -644,6 +644,7 @@ end
             "0317_8471",        # Wrong separator
             "0317.8471",        # Wrong separator
             "0317 8471",        # Space separator
+            "0317-",            # No checksum
             # Empty or invalid
             "",                 # Empty string
             "   ",              # Whitespace only
@@ -670,7 +671,6 @@ end
             "0317-8473",  # Wrong checksum (should be 1)
             "0317-847",   # Missing check digit - interpreted as wrong checksum
             "031-8471",   # Too few digits but parsed as checksum violation
-            "0317-",      # Missing last part but parsed as checksum violation
             "-8471",      # Missing first part but parsed as checksum violation
             "0317",       # Missing hyphen and last part but parsed as checksum violation
             "1050-1241",  # Wrong checksum (should be X/10)
@@ -736,25 +736,25 @@ end
 @testset "ISBN" begin
     valid_examples = [
         # Basic ISBN-13 format (978 prefix)
-        ("978-0-439-02348-1", ISBN(9780439023481)),
-        ("978-1-4028-9462-6", ISBN(9781402894626)),
-        ("978-0-123-45678-6", ISBN(9780123456786)),
-        ("978-0-486-41950-3", ISBN(9780486419503)),
+        ("978-0-439-02348-1", ISBN(978043902348)),
+        ("978-1-4028-9462-6", ISBN(978140289462)),
+        ("978-0-123-45678-6", ISBN(978012345678)),
+        ("978-0-486-41950-3", ISBN(978048641950)),
         # ISBN-13 format (979 prefix)
-        ("979-8-88645-174-0", ISBN(9798886451740)),
-        ("979-1-234-56789-6", ISBN(9791234567896)),
+        ("979-8-88645-174-0", ISBN(979888645174)),
+        ("979-1-234-56789-6", ISBN(979123456789)),
         # With lowercase prefix
-        ("isbn:978-0-439-02348-1", ISBN(9780439023481)),
-        ("isbn:979-8-88645-174-0", ISBN(9798886451740)),
-        ("isbn:978-1-4028-9462-6", ISBN(9781402894626)),
+        ("isbn:978-0-439-02348-1", ISBN(978043902348)),
+        ("isbn:979-8-88645-174-0", ISBN(979888645174)),
+        ("isbn:978-1-4028-9462-6", ISBN(978140289462)),
         # With uppercase prefix
-        ("ISBN:978-0-439-02348-1", ISBN(9780439023481)),
-        ("ISBN:979-8-88645-174-0", ISBN(9798886451740)),
-        ("ISBN:978-1-4028-9462-6", ISBN(9781402894626)),
+        ("ISBN:978-0-439-02348-1", ISBN(978043902348)),
+        ("ISBN:979-8-88645-174-0", ISBN(979888645174)),
+        ("ISBN:978-1-4028-9462-6", ISBN(978140289462)),
         # Without hyphens (should be parsed correctly)
-        ("9780439023481", ISBN(9780439023481)),
-        ("9798886451740", ISBN(9798886451740)),
-        ("9781402894626", ISBN(9781402894626))
+        ("9780439023481", ISBN(978043902348)),
+        ("9798886451740", ISBN(979888645174)),
+        ("9781402894626", ISBN(978140289462))
     ]
 
     @testset "Parse/tryparse equivalence and invariants" begin
@@ -893,27 +893,27 @@ end
 
     @testset "Miscellaneous" begin
         # Test integer constructor
-        isbn_int = ISBN(9780439023481)
+        isbn_int = ISBN(978043902348)
         isbn_str = parse(ISBN, "978-0-439-02348-1")
         @test shortcode(isbn_int) == shortcode(isbn_str)
         @test string(isbn_int) == "ISBN 978-0-439-02348-1"
 
         # Test another valid 13-digit ISBN
-        isbn_int2 = ISBN(9781402894626)
+        isbn_int2 = ISBN(978140289462)
         isbn_str2 = parse(ISBN, "978-1-4028-9462-6")
         @test shortcode(isbn_int2) == shortcode(isbn_str2)
 
         # Test 979 prefix ISBN
-        isbn_979 = ISBN(9798886451740)
+        isbn_979 = ISBN(979888645174)
         @test shortcode(isbn_979) == "979-8-88645-174-0"
         @test string(isbn_979) == "ISBN 979-8-88645-174-0"
 
         # Test invalid integer inputs
-        @test_throws MalformedIdentifier{ISBN} ISBN(123456789012)  # 12 digits
-        @test_throws MalformedIdentifier{ISBN} ISBN(12345678901234)  # 14 digits
-        @test_throws MalformedIdentifier{ISBN} ISBN(9771234567890)  # doesn't start with 978/979
-        @test_throws MalformedIdentifier{ISBN} ISBN(9751234567890)  # invalid prefix
-        @test_throws MalformedIdentifier{ISBN} ISBN(9801234567890)  # invalid prefix
+        @test_throws MalformedIdentifier{ISBN} ISBN(12345678901)  # 11 digits
+        @test_throws MalformedIdentifier{ISBN} ISBN(1234567890123)  # 13 digits
+        @test_throws MalformedIdentifier{ISBN} ISBN(977123456789)  # doesn't start with 978/979
+        @test_throws MalformedIdentifier{ISBN} ISBN(975123456789)  # invalid prefix
+        @test_throws MalformedIdentifier{ISBN} ISBN(980123456789)  # invalid prefix
 
         # Test EAN13 conversion
         isbn = parse(ISBN, "978-0-439-02348-1")
@@ -923,7 +923,7 @@ end
 
         # Test equality and hashing
         isbn1 = parse(ISBN, "978-0-439-02348-1")
-        isbn2 = ISBN(9780439023481)
+        isbn2 = ISBN(978043902348)
         isbn3 = parse(ISBN, "979-8-88645-174-0")
 
         @test isbn1 == isbn2
@@ -1731,9 +1731,6 @@ end
         # With space after colon (parser is lenient)
         ("pmid: 123456", PMID(123456)),
         ("PMID: 123456", PMID(123456)),
-        # With various whitespace (parser strips leading/trailing whitespace)
-        ("  1234567  ", PMID(1234567)),
-        ("1234567\t", PMID(1234567)),
         # URL format
         ("https://pubmed.ncbi.nlm.nih.gov/1234567", PMID(1234567)),
         ("https://pubmed.ncbi.nlm.nih.gov/12345678", PMID(12345678)),
@@ -1859,16 +1856,16 @@ end
         # Special valid cases
         ("PMC0", PMCID(0)),              # Zero is valid
         ("PMC00123", PMCID(123)),        # Leading zeros are stripped
-        ("PMC123　", PMCID(123)),        # Trailing full-width space stripped
         # Cases without PMC prefix (parser is lenient)
         ("123456", PMCID(123456)),       # Missing PMC prefix - parser adds it
         # PMCID prefix cases
         ("pmcid:123456", PMCID(123456)), # PMCID prefix without PMC
+        ("pmcid: PMC123456", PMCID(123456)), # Space after colon
         # URL format
         ("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC123456", PMCID(123456)),
-        ("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1234567", PMCID(1234567)),
-        ("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC87654321", PMCID(87654321)),
-        ("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12345678", PMCID(12345678))
+        ("https://pmc.ncbi.nlm.nih.gov/pmc/articles/PMC1234567", PMCID(1234567)),
+        ("http://www.ncbi.nlm.nih.gov/pmc/articles/PMC87654321", PMCID(87654321)),
+        ("ncbi.nlm.nih.gov/pmc/articles/PMC12345678", PMCID(12345678))
     ]
 
     @testset "Parse/tryparse equivalence and invariants" begin
@@ -1930,12 +1927,9 @@ end
             # Too long (PMCIDs are typically up to 10 digits after PMC)
             "PMC12345678901234567890", # Way too long
             "PMC12345678901",    # Too long
-            # Invalid prefixes (but not "pmcid:123456" - that's valid)
-            "pmcid: PMC123456",  # Space after colon
             # URL format errors
             "https://www.ncbi.nlm.nih.gov/pmc/articles/", # Missing PMC
             "https://www.ncbi.nlm.nih.gov/pmc/articles/abc", # Non-PMC format
-            "https://pmc.ncbi.nlm.nih.gov/articles/PMC123456", # This URL pattern not supported
             # Unicode edge cases
             "PMC123456🔢",       # emoji
             "ＰMC123456",        # full-width P
@@ -2075,7 +2069,7 @@ end
             "１２３４５６７"           # all full-width
         ]
 
-        for bad_viaf in malformed_examples
+        @testset for bad_viaf in malformed_examples
             @test_throws MalformedIdentifier{VIAF} parse(VIAF, bad_viaf)
             @test tryparse(VIAF, bad_viaf) === nothing
         end
