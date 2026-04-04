@@ -8,20 +8,21 @@ Structured and validated types for academic identifiers.
 
 ## Implemented Identifiers
 
-- `ArXiv` - arXiv preprint identifiers
-- `DOI` - Digital Object Identifiers
-- `ISNI` - International Standard Name Identifiers
-- `ISSN` - International Standard Serial Numbers
-- `ISBN` - International Standard Book Numbers
-- `OCN` - OCLC Control Numbers
-- `ORCID` - Open Researcher and Contributor Identifiers
-- `OpenAlexID` - OpenAlex identifiers
-- `RAiD` - Research Activity Identifiers
-- `ROR` - Research Organization Registry identifiers
-- `PMID` - PubMed Identifiers
-- `PMCID` - PubMed Central Identifiers
-- `VIAF` - Virtual International Authority File identifiers
-- `Wikidata` - Wikidata entity identifiers
+- [`ArXiv`](@ref): arXiv preprint identifiers
+- [`DOI`](@ref): Digital Object Identifiers
+- [`EAN13`](@ref): European Article Numbers (13-digit barcodes)
+- [`ISBN`](@ref): International Standard Book Numbers
+- [`ISNI`](@ref): International Standard Name Identifiers
+- [`ISSN`](@ref): International Standard Serial Numbers
+- [`OCN`](@ref): OCLC Control Numbers
+- [`OpenAlexID`](@ref): OpenAlex entity identifiers
+- [`ORCID`](@ref): Open Researcher and Contributor Identifiers
+- [`PMCID`](@ref): PubMed Central Identifiers
+- [`PMID`](@ref): PubMed Identifiers
+- [`RAiD`](@ref): Research Activity Identifiers
+- [`ROR`](@ref): Research Organization Registry identifiers
+- [`VIAF`](@ref): Virtual International Authority File identifiers
+- [`Wikidata`](@ref): Wikidata entity identifiers
 
 ## Examples
 
@@ -46,11 +47,15 @@ julia> shortcode(orcid)
 """
 module AcademicIdentifiers
 
-using DigitalIdentifiersBase
-import DigitalIdentifiersBase: idcode, idchecksum, shortcode, purl, purlprefix, parseid, parsefor, lchopfolded, unsafe_substr
+using FastIdentifiers
+import FastIdentifiers: idcode, idchecksum, purlprefix, shortcode
+using FastIdentifiers: @defid
+using FastIdentifiers.Checksums: Checksums, mod10, mod11_2
 
-export AcademicIdentifier, ArXiv, DOI, ISNI, ISSN, ISBN, OCN, ORCID, OpenAlexID, RAiD, ROR, PMID, PMCID, VIAF, Wikidata
-DigitalIdentifiersBase.@reexport
+FastIdentifiers.@reexport
+
+export AcademicIdentifier, ArXiv, DOI, ISNI, ISSN, ISBN, OCN, ORCID,
+    OpenAlexID, RAiD, ROR, PMID, PMCID, VIAF, Wikidata, EAN13
 
 include("isbn-hyphenation.jl")
 
@@ -67,15 +72,49 @@ See also: `AbstractIdentifier`.
 """
 abstract type AcademicIdentifier <: AbstractIdentifier end
 
+
+## Local helpers
+
 digitstart(s::AbstractString) = !isempty(s) && codeunit(s, 1) ∈ 0x30:0x39
 
-function iso7064mod11m2checksum(num::Integer)
-    digsum = 0
-    for dig in Iterators.reverse(digits(num))
-        digsum = (digsum + dig) * 2
+"""
+    chopprefixes(str, prefixes...) -> (matched::Bool, rest::SubString)
+
+Case-insensitive prefix stripping.  All prefixes must be lowercase ASCII.
+"""
+function chopprefixes(str::AbstractString, prefixes::AbstractString...)
+    s = SubString(string(str))
+    matched = false
+    for prefix in prefixes
+        ncodeunits(s) >= ncodeunits(prefix) || continue
+        ok = true
+        for i in 1:ncodeunits(prefix)
+            (codeunit(s, i) | 0x20) == codeunit(prefix, i) || (ok = false; break)
+        end
+        ok || continue
+        s = SubString(s, ncodeunits(prefix) + 1)
+        matched = true
     end
-    (12 - digsum % 11) % 11
+    matched, s
 end
+
+# ISSN check digit: weighted sum with weights 8,7,...,2 (right to left), mod 11.
+# Check value 10 maps to 'X'.
+function issn_mod11(code::Integer)
+    s, w = 0, 2
+    while code > 0
+        code, d = divrem(code, 10)
+        s += d * w
+        w += 1
+    end
+    (11 - s % 11) % 11
+end
+Checksums.parse_byte(::typeof(issn_mod11), bytevar::Symbol, nctx::Checksums.NodeCtx) =
+    Checksums.parse_byte(mod11_2, bytevar, nctx)
+Checksums.valid_bytes(::typeof(issn_mod11), nctx::Checksums.NodeCtx) =
+    Checksums.valid_bytes(mod11_2, nctx)
+Checksums.print_byte(::typeof(issn_mod11), valexpr, nctx::Checksums.NodeCtx) =
+    Checksums.print_byte(mod11_2, valexpr, nctx)
 
 function parsedashcode(::Type{I}, str::AbstractString, skip::NTuple{N, Char}) where {I <: Integer, N}
     isempty(str) && return nothing
@@ -104,8 +143,8 @@ end
 parsedashcode(T::Type{<:Integer}, num::AbstractString, skip::Char) =
     parsedashcode(T, num, (skip,))
 
- 
-# ArXiv
+
+## ArXiv
 
 """
     ArXiv <: AcademicIdentifier
@@ -126,16 +165,13 @@ backdated to include all ArXiv entries).
 
 ```julia-repl
 julia> parse(ArXiv, "1411.1607v4")
-ArXiv:2001.12345v4
+ArXiv:1411.1607v4
 
 julia> parse(ArXiv, "https://arxiv.org/abs/1411.1607")
-ArXiv:2001.12345
+ArXiv:1411.1607
 
 julia> purl(parse(ArXiv, "arXiv:1411.1607"))
-"https://arxiv.org/abs/2001.12345"
-
-julia> convert(DOI, parse(ArXiv, "1411.1607v4"))
-DOI:10.48550/arXiv.1411.1607
+"https://arxiv.org/abs/1411.1607"
 
 julia> parse(ArXiv, "math.GT/0309136") # pre-2007 form
 ArXiv:math.GT/0309136
@@ -144,226 +180,68 @@ julia> parse(ArXiv, "arxiv:hep-th/9901001v1")
 ArXiv:hep-th/9901001v1
 ```
 """
-struct ArXiv <: AcademicIdentifier
-    meta::UInt32 # It's this or we go over 8 bytes
-    number::UInt32
-end
-
-function parseid(::Type{ArXiv}, id::SubString)
-    _, id = lchopfolded(id, "https://", "http://")
-    isweb, id = lchopfolded(id, "arxiv.org/")
-    if isweb
-        prefixend = findfirst('/', id)
-        isnothing(prefixend) && return MalformedIdentifier{ArXiv}(id, "incomplete ArXiv URL")
-        id = unsafe_substr(id, prefixend)
-    else
-        _, id = lchopfolded(id, "arxiv:")
-    end
-    if occursin('/', id)
-        arxiv_old(id)
-    else
-        arxiv_new(id)
-    end
-end
-
-arxiv_meta(archive::UInt8, class::UInt8, year::UInt8, month::UInt8, version::UInt16) =
-    UInt32(archive) << (32 - 5) +
-    UInt32(class) << (32 - 11) +
-    UInt32(year) << (32 - 18) +
-    UInt32(month) << (32 - 22) +
-    version
-
-arxiv_archive(arxiv::ArXiv) = (arxiv.meta >> (32 - 5)) % UInt8
-arxiv_class(arxiv::ArXiv) = 0x3f & (arxiv.meta >> (32 - 11)) % UInt8
-arxiv_year(arxiv::ArXiv) = 0x7f & (arxiv.meta >> (32 - 18)) % UInt8
-arxiv_month(arxiv::ArXiv) = 0x0f & (arxiv.meta >> (32 - 22)) % UInt8
-arxiv_version(arxiv::ArXiv) = arxiv.meta % UInt16 & 0x03ff
-
-function arxiv_new(id::AbstractString)
-    ncodeunits(id) >= 6 || return MalformedIdentifier{ArXiv}(id, "is too short to be a valid ArXiv identifier")
-    bytes = codeunits(id)
-    bdigit(b::UInt8) = b ∈ 0x30:0x39
-    local year, month
-    y1, y2, m1, m2 = @inbounds bytes[1], bytes[2], bytes[3], bytes[4]
-    all(bdigit, (y1, y2)) || return MalformedIdentifier{ArXiv}(id, "year component (YYmm.nnnnn) must be an integer")
-    all(bdigit, (m1, m2)) || return MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be an integer")
-    year = 0xa * (y1 - 0x30) + (y2 - 0x30)
-    month = 0xa * (m1 - 0x30) + (m2 - 0x30)
-    month ∈ 1:12 || return MalformedIdentifier{ArXiv}(id, "month component (yyMM.nnnnn) must be between 01 and 12")
-    (@inbounds bytes[5]) == UInt8('.') || return MalformedIdentifier{ArXiv}(id, "must contain a period separating the date and number component (yymm.nnnnn)")
-    i, number, version = 6, zero(UInt32), zero(UInt16)
-    @inbounds while i <= ncodeunits(id)
-        b = bytes[i]
-        i += 1
-        if (b | 0x20) == UInt8('v')
-            i > ncodeunits(id) && return MalformedIdentifier{ArXiv}(id, "version component must be non-empty")
-            break
-        elseif bdigit(b)
-            number = muladd(number, UInt32(10), b - 0x30)
-        else
-            return MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must be an integer")
-        end
-    end
-    number <= UInt32(99999) || return MalformedIdentifier{ArXiv}(id, "number component (yymm.NNNNN) must no more than 5 digits")
-    @inbounds while i <= ncodeunits(id)
-        b = bytes[i]
-        if bdigit(b)
-            version = muladd(version, UInt8(10), b - 0x30)
-            iszero(version & ~0x03ff) || return MalformedIdentifier{ArXiv}(id, "version is larger than the maximum supported value (1023)")
-        else
-            return MalformedIdentifier{ArXiv}(id, "version component must be an integer")
-        end
-        i += 1
-    end
-    ArXiv(arxiv_meta(0x00, 0x00, year, month, version), number)
-end
-
-const ARXIV_OLD_ARCHIVES, ARXIV_OLD_CLASSES = let
-    arxiv_catsubs = (
-        "astro-ph" => ["CO", "EP", "GA", "HE", "IM", "SR"],
-        "cond-mat" => ["dis-nn", "mes-hall", "mtrl-sci", "other", "quant-gas", "soft", "stat-mech", "str-el", "supr-con"],
-        "cs" => ["AI", "AR", "CC", "CE", "CG", "CL", "CR", "CV", "CY", "DB", "DC", "DL", "DM", "DS", "ET",
-                 "FL", "GL", "GR", "GT", "HC", "IR", "IT", "LG", "LO", "MA", "MM", "MS", "NA", "NI", "OH",
-                 "OS", "PF", "PL", "RO", "SC", "SD", "SE", "SI", "SY"],
-        "econ" => ["EM", "GN", "TH"],
-        "eess" => ["AS", "IV", "SP", "SY"],
-        "gr-qc" => String[],
-        "hep-ex" => String[],
-        "hep-lat" => String[],
-        "hep-ph" => String[],
-        "hep-th" => String[],
-        "math-ph" => String[],
-        "math" => ["AC", "AG", "AP", "AT", "CA", "CO", "CT", "CV", "DG", "DS", "FA", "GM", "GN", "GR", "GT",
-                   "HO", "IT", "KT", "LO", "MG", "MP", "NA", "NT", "OA", "OC", "PR", "QA", "RA", "RT", "SG",
-                   "SP", "ST",],
-        "nlin" => ["AO", "CD", "CG", "PS", "SI"],
-        "nucl-ex" => String[],
-        "nucl-th" => String[],
-        "physics" => ["acc-ph", "ao-ph", "app-ph", "atm-clus", "atom-ph", "bio-ph", "chem-ph", "class-ph",
-                      "comp-ph", "data-an", "ed-pn", "flu-dyn", "gen-ph", "geo-ph", "hist-ph", "ins-det",
-                      "med-ph", "optics", "plasm-ph", "pop-ph", "soc-ph", "space-ph"],
-        "q-bio" => ["BM", "CB", "GN", "MN", "NC", "OT", "PE", "QM", "SC", "TO"],
-        "q-fin" => ["CP", "EC", "GN", "MF", "PM", "PR", "RM", "ST", "SR"],
-        "quant-ph" => String[],
-        "stat" => ["AP", "CO", "ME", "ML", "OT", "TH"])
-    map(first, arxiv_catsubs), map(last, arxiv_catsubs)
-end
-
-function arxiv_old(id::AbstractString)
-    bytes = codeunits(id)
-    slashpos = @something(findfirst(==(UInt8('/')), bytes),
-                          return MalformedIdentifier{ArXiv}(id, "must contain a slash separating the components (archive.class/YYMMNNN)"))
-    archclass = unsafe_substr(id, 0, slashpos - 1)
-    numverstr = unsafe_substr(id, slashpos)
-    dotpos = something(findfirst(==(UInt8('.')), view(bytes, 1:slashpos)), slashpos)
-    archive = unsafe_substr(archclass, 0, dotpos - 1)
-    class = unsafe_substr(archclass, dotpos, max(0, slashpos - dotpos - 1))
-    archiveidx = findfirst(==(archive), ARXIV_OLD_ARCHIVES)
-    isnothing(archiveidx) && return MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive name")
-    classidx = if isempty(class)
-        0
-    else
-        findfirst(==(class), ARXIV_OLD_CLASSES[archiveidx])
-    end
-    isnothing(classidx) && return MalformedIdentifier{ArXiv}(id, "does not use a recognised ArXiv archive class")
-    length(class) ∈ (0, 2) || return MalformedIdentifier{ArXiv}(id, "class component must be 2 characters")
-    #--
-    ncodeunits(numverstr) >= 5 || return MalformedIdentifier{ArXiv}(id, "is too short to be a valid ArXiv identifier")
-    bytes = codeunits(numverstr)
-    bdigit(b::UInt8) = b ∈ 0x30:0x39
-    local year, month
-    y1, y2, m1, m2 = @inbounds bytes[1], bytes[2], bytes[3], bytes[4]
-    all(bdigit, (y1, y2)) || return MalformedIdentifier{ArXiv}(id, "year component (YYmmnnnn) must be an integer")
-    all(bdigit, (m1, m2)) || return MalformedIdentifier{ArXiv}(id, "month component (yyMMnnnn) must be an integer")
-    year = 0xa * (y1 - 0x30) + (y2 - 0x30)
-    month = 0xa * (m1 - 0x30) + (m2 - 0x30)
-    (year >= 91 || year <= 7) || return MalformedIdentifier{ArXiv}(id, "year component (YYmmnnn) must be between 91 and 07")
-    month ∈ 1:12 || return MalformedIdentifier{ArXiv}(id, "month component (yyMMnnnn) must be between 01 and 12")
-    i, number, version = 5, zero(UInt32), zero(UInt16)
-    @inbounds while i <= ncodeunits(numverstr)
-        b = bytes[i]
-        i += 1
-        if (b | 0x20) == UInt8('v')
-            i > ncodeunits(id) && return MalformedIdentifier{ArXiv}(id, "version component must be non-empty")
-            break
-        elseif bdigit(b)
-            number = muladd(number, UInt32(10), b - 0x30)
-        else
-            return MalformedIdentifier{ArXiv}(id, "number component (yymmNNNN) must be an integer")
-        end
-    end
-    number <= UInt32(9999) || return MalformedIdentifier{ArXiv}(id, "number component (yymmNNNN) must no more than 4 digits")
-    @inbounds while i <= ncodeunits(numverstr)
-        b = bytes[i]
-        if bdigit(b)
-            version = muladd(version, UInt8(10), b - 0x30)
-            iszero(version & ~0x03ff) || return MalformedIdentifier{ArXiv}(id, "version is larger than the maximum supported value (1023)")
-        else
-            return MalformedIdentifier{ArXiv}(id, "version component must be an integer")
-        end
-        i += 1
-    end
-    #--
-    ArXiv(arxiv_meta(archiveidx % UInt8, classidx % UInt8, year, month, version), number)
-end
-
-function shortcode(io::IO, arxiv::ArXiv)
-    archid, classid = arxiv_archive(arxiv), arxiv_class(arxiv)
-    if !iszero(archid) # Old form
-        print(io, ARXIV_OLD_ARCHIVES[archid])
-        if !iszero(classid)
-            print(io, '.', ARXIV_OLD_CLASSES[archid][classid])
-        end
-        print(io, '/')
-    end
-    year, month, ver = arxiv_year(arxiv), arxiv_month(arxiv), arxiv_version(arxiv)
-    print(io, lpad(year, 2, '0'), lpad(month, 2, '0'))
-    if iszero(archid) # New form
-        print(io, '.', lpad(arxiv.number, ifelse(year >= 15, 5, 4), '0'))
-    else # Old form
-        print(io, lpad(arxiv.number, 3, '0'))
-    end
-    if ver > 0
-        print(io, 'v', ver)
-    end
-end
-
-idcode(arxiv::ArXiv) =
-    UInt64(arxiv.meta & 0xffffff00) << 32 +
-    UInt64(arxiv.number) << 8 +
-    arxiv_version(arxiv)
-
-purlprefix(::Type{ArXiv}) = "https://arxiv.org/abs/"
-
-function Base.print(io::IO, arxiv::ArXiv)
-    get(io, :limit, false) === true && get(io, :compact, false) === true ||
-        print(io, "arXiv:")
-    shortcode(io, arxiv)
-end
+@defid(ArXiv <: AcademicIdentifier,
+       (choice(:format,
+            :new => seq(:year(digits(2, pad=2)),
+                        :month(digits(2, min=1, max=12, pad=2)),
+                        ".", :num(digits(4:5, pad=4)),
+                        optional("v", :ver(digits(max=1023)))),
+            :old => seq(choice(:archive,
+                :astro_ph => seq("astro-ph.", :class(choice("CO", "EP", "GA", "HE", "IM", "SR"))),
+                :cond_mat => seq("cond-mat.", :class(choice("dis-nn", "mes-hall", "mtrl-sci", "other", "quant-gas", "soft", "stat-mech", "str-el", "supr-con"))),
+                :cs       => seq("cs.", :class(choice("AI", "AR", "CC", "CE", "CG", "CL", "CR", "CV", "CY", "DB", "DC", "DL", "DM", "DS", "ET", "FL", "GL", "GR", "GT", "HC", "IR", "IT", "LG", "LO", "MA", "MM", "MS", "NA", "NI", "OH", "OS", "PF", "PL", "RO", "SC", "SD", "SE", "SI", "SY"))),
+                :econ     => seq("econ.", :class(choice("EM", "GN", "TH"))),
+                :eess     => seq("eess.", :class(choice("AS", "IV", "SP", "SY"))),
+                :gr_qc    => "gr-qc",
+                :hep_ex   => "hep-ex",
+                :hep_lat  => "hep-lat",
+                :hep_ph   => "hep-ph",
+                :hep_th   => "hep-th",
+                :math_ph  => "math-ph",
+                :math     => seq("math.", :class(choice("AC", "AG", "AP", "AT", "CA", "CO", "CT", "CV", "DG", "DS", "FA", "GM", "GN", "GR", "GT", "HO", "IT", "KT", "LO", "MG", "MP", "NA", "NT", "OA", "OC", "PR", "QA", "RA", "RT", "SG", "SP", "ST"))),
+                :nlin     => seq("nlin.", :class(choice("AO", "CD", "CG", "PS", "SI"))),
+                :nucl_ex  => "nucl-ex",
+                :nucl_th  => "nucl-th",
+                :physics  => seq("physics.", :class(choice("acc-ph", "ao-ph", "app-ph", "atm-clus", "atom-ph", "bio-ph", "chem-ph", "class-ph", "comp-ph", "data-an", "ed-pn", "flu-dyn", "gen-ph", "geo-ph", "hist-ph", "ins-det", "med-ph", "optics", "plasm-ph", "pop-ph", "soc-ph", "space-ph"))),
+                :q_bio    => seq("q-bio.", :class(choice("BM", "CB", "GN", "MN", "NC", "OT", "PE", "QM", "SC", "TO"))),
+                :q_fin    => seq("q-fin.", :class(choice("CP", "EC", "GN", "MF", "PM", "PR", "RM", "ST", "SR"))),
+                :quant_ph => "quant-ph",
+                :stat     => seq("stat.", :class(choice("AP", "CO", "ME", "ML", "OT", "TH")))),
+              "/", :year(digits(2, pad=2, exclude=8:90)),
+              :month(digits(2, min=1, max=12, pad=2)),
+              :num(digits(3:4, pad=3)),
+              optional("v", :ver(digits(max=1023)))))),
+       prefix="arXiv:", purlprefix="https://arxiv.org/abs/")
 
 
-# DOI
+## DOI
 
 """
     DOI <: AcademicIdentifier
 
-A Digital Object Identifier (DOI) is a unique identifier for a broad range of digital objects.
+A Digital Object Identifier (DOI) is a persistent identifier for digital objects.
 
-A DOI it consists of a registrant prefix and an object suffix separated by a
-slash. The registrant prefix consists solely of digits and periods, while
-the object suffix is unrestricted, but treated as ASCII case-insensitive.
+Standardised in [ISO 26324](https://www.iso.org/standard/43506.html) and built
+on the [Handle System](https://www.dona.net/handle-system), DOIs are managed by
+the [International DOI Foundation](https://doi.org/) and assigned by registration
+agencies such as Crossref and DataCite. A DOI consists of a registrant prefix
+(digits and periods, e.g. `10.1038`) and an object suffix separated by a slash.
+The object suffix is unrestricted but treated as ASCII case-insensitive.
 
 # Examples
 
 ```julia-repl
 julia> parse(DOI, "10.1145/3276490")
-doi:10.1145/3276490
+DOI:10.1145/3276490
 
 julia> parse(DOI, "https://doi.org/10.1137/141000671")
 DOI:10.1137/141000671
 
-julia> println(parse(DOI, "10.1145/3276490"))
-doi:10.1145/3276490
+julia> string(parse(DOI, "10.1145/3276490"))
+"doi:10.1145/3276490"
+
+julia> purl(parse(DOI, "10.1145/3276490"))
+"https://doi.org/10.1145/3276490"
 
 julia> parse(DOI, "10.123/abc") == parse(DOI, "10.123/AbC")
 true
@@ -375,35 +253,41 @@ struct DOI <: AcademicIdentifier
 end
 
 function Base.convert(::Type{DOI}, arxiv::ArXiv)
-    arxiv_nover = ArXiv(arxiv.meta & 0xfffffe00, arxiv.number)
-    doistr = string("10.48550/", "arXiv.", shortcode(arxiv_nover))
+    sc = shortcode(arxiv)
+    # Strip version suffix (vN) for DOI
+    vidx = findlast('v', sc)
+    base = if !isnothing(vidx) && vidx > 1 sc[1:prevind(sc, vidx)] else sc end
+    doistr = string("10.48550/arXiv.", base)
     DOI(SubString(doistr, 1, 8), SubString(doistr, 10))
 end
 
-function parseid(::Type{DOI}, doi::SubString{String})
+function Base.parse(::Type{DOI}, id::AbstractString)
+    doi = SubString(string(id))
     if !digitstart(doi)
-        _, doi = lchopfolded(doi, "doi:", "https://", "http://", "dx.doi.org/", "doi.org/")
+        _, doi = chopprefixes(doi, "doi:", "https://", "http://", "dx.doi.org/", "doi.org/")
     end
     registrant, object = if '/' in doi
         split(doi, '/', limit=2)
     else
         doi, ""
     end
-    isempty(object) && return MalformedIdentifier{DOI}(doi, "must contain an object component after the slash")
+    isempty(object) && throw(MalformedIdentifier{DOI}(doi, ncodeunits(doi), "must contain an object component after the slash"))
     lastdecimal = 0
     for (i, char) in enumerate(codeunits(registrant))
         if char == UInt8('.')
-            i - 1 == lastdecimal && return MalformedIdentifier{DOI}(doi, "registrant cannot initial or consecutive periods")
+            i - 1 == lastdecimal && throw(MalformedIdentifier{DOI}(doi, i, "registrant cannot initial or consecutive periods"))
             lastdecimal = i
         elseif char ∉ UInt8('0'):UInt8('9')
-            return MalformedIdentifier{DOI}(doi, "registrant must be a sequence of digits and periods")
+            throw(MalformedIdentifier{DOI}(doi, i, "registrant must be a sequence of digits and periods"))
         end
     end
-    lastdecimal == 0 && return MalformedIdentifier{DOI}(doi, "registrant must contain at least one period")
-    DOI(registrant, object)
+    lastdecimal == 0 && throw(MalformedIdentifier{DOI}(doi, 1, "registrant must contain at least one period"))
+    DOI(SubString(string(registrant)), SubString(string(object)))
 end
 
-parseid(::Type{DOI}, doi::SubString) = parseid(DOI, SubString(String(doi)))
+function Base.tryparse(::Type{DOI}, id::AbstractString)
+    try parse(DOI, id) catch e; e isa MalformedIdentifier || rethrow(); nothing end
+end
 
 purlprefix(::Type{DOI}) = "https://doi.org/"
 shortcode(io::IO, doi::DOI) = print(io, doi.registrant, '/', doi.object)
@@ -432,7 +316,285 @@ function Base.hash(doi::DOI, h::UInt)
 end
 
 
-# OCN
+## EAN13
+
+"""
+    EAN13 <: AcademicIdentifier
+
+A European Article Number (EAN-13) is a 13-digit barcode used globally for product identification.
+
+Defined by [GS1](https://www.gs1.org/) and standardised in
+[ISO/IEC 15420](https://www.iso.org/standard/46143.html), EAN-13 is a superset
+of the original 12-digit Universal Product Code (UPC) system. It consists of a
+12-digit code followed by a check digit calculated with a weighted mod-10
+algorithm. [`ISBN`](@ref)-13 codes are a subset of EAN-13 (prefixes 978/979).
+Hyphens in the input are accepted and stripped during parsing.
+
+# Examples
+
+```julia-repl
+julia> parse(EAN13, "9780596520687")
+EAN13:9780596520687
+
+julia> parse(EAN13, "978-0-596-52068-7")
+EAN13:9780596520687
+
+julia> println(parse(EAN13, "9780596520687"))
+9780596520687
+
+julia> parse(EAN13, "9780596520688")
+ERROR: ChecksumViolation{EAN13}: expected 7, got 8
+```
+"""
+@defid(EAN13 <: AcademicIdentifier,
+       (:code(digits(12, pad=12, skip="-")),
+        skip("-"), checkdigit(:code, mod10)))
+
+const IAN = EAN13
+
+
+## ISBN
+
+"""
+    ISBN <: AcademicIdentifier
+
+An International Standard Book Number (ISBN) is a unique identifier for books and book-like publications.
+
+Standardised in [ISO 2108](https://www.iso.org/standard/65483.html) and
+managed by the [International ISBN Agency](https://www.isbn-international.org/),
+ISBNs come in two forms: 10-digit (ISBN-10, with a mod-11 check digit that may
+be `X`) and 13-digit (ISBN-13, an [`EAN13`](@ref) code with prefix 978 or 979).
+ISBN-10 inputs are automatically converted to ISBN-13 for storage. Output is
+hyphenated according to the official range data.
+
+# Examples
+
+```julia-repl
+julia> parse(ISBN, "0141439564")
+ISBN:0-14-143956-4
+
+julia> parse(ISBN, "978-1-7185-0276-5")
+ISBN:978-1-7185-0276-5
+
+julia> string(parse(ISBN, "9781718502765"))
+"ISBN 978-1-7185-0276-5"
+```
+"""
+struct ISBN <: AcademicIdentifier
+    code::EAN13
+    is10::Bool  # true when parsed from ISBN-10 format
+end
+
+ISBN(ean::EAN13) = ISBN(ean, false)
+
+Base.convert(::Type{EAN13}, isbn::ISBN) = isbn.code
+
+function Base.convert(::Type{ISBN}, ean::EAN13)
+    idcode(ean) ÷ 10^9 ∈ (978, 979) ||
+        throw(MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979"))
+    ISBN(ean)
+end
+
+function ISBN(id::Integer, check::Integer)
+    ndigits(id) <= 12 || throw(MalformedIdentifier{ISBN}(id, "must be at most a 12-digit integer"))
+    id ÷ 10^9 ∈ (978, 979) || throw(MalformedIdentifier{ISBN}(id, "must start with 978 or 979"))
+    ISBN(EAN13(id, check))
+end
+
+function ISBN(id::Integer)
+    ndigits(id) <= 12 || throw(MalformedIdentifier{ISBN}(id, "must be at most a 12-digit integer"))
+    id ÷ 10^9 ∈ (978, 979) || throw(MalformedIdentifier{ISBN}(id, "must start with 978 or 979"))
+    ISBN(EAN13(id))
+end
+
+# ISBN-10 checksum: weighted sum with weights 10,9,...,2, mod 11
+function isbn10_checkdigit(code9::Integer)
+    csum = 0
+    for (i, digit) in enumerate(digits(code9 * 10, pad=10))
+        csum += i * digit
+    end
+    0xb - mod1(csum, 0xb)
+end
+
+function Base.parse(::Type{ISBN}, id::AbstractString)
+    id = SubString(string(id))
+    _, id = chopprefixes(id, "isbn:", "isbn")
+    ncode = sum(c -> c ∉ (UInt8(' '), UInt8('-')), codeunits(id), init=0)
+    if ncode == 13
+        code = parsedashcode(UInt64, id, ('-', ' '))
+        isnothing(code) && throw(MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens"))
+        code.check <= 0x9 || throw(MalformedIdentifier{ISBN}(id, "check digit must be 0-9"))
+        ISBN(code.num, code.check)
+    elseif ncode == 10
+        code = parsedashcode(UInt64, id, ('-', ' '))
+        isnothing(code) && throw(MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens"))
+        code.check <= 0xa || throw(MalformedIdentifier{ISBN}(id, "check digit must be 0-9 or X"))
+        cdigit = isbn10_checkdigit(code.num)
+        cdigit == code.check ||
+            throw(ChecksumViolation{ISBN}(id, cdigit, code.check))
+        # Convert ISBN-10 to ISBN-13 (978 prefix)
+        ean12 = 978 * 10^9 + code.num
+        ISBN(EAN13(ean12), true)
+    else
+        throw(MalformedIdentifier{ISBN}(id, "must be a 10 or 13-digit integer"))
+    end
+end
+
+function Base.tryparse(::Type{ISBN}, id::AbstractString)
+    try parse(ISBN, id) catch e; e isa Union{MalformedIdentifier, ChecksumViolation} || rethrow(); nothing end
+end
+
+Base.:(==)(a::ISBN, b::ISBN) = a.code == b.code
+Base.hash(isbn::ISBN, h::UInt) = hash(isbn.code, h)
+
+function Base.print(io::IO, isbn::ISBN)
+    get(io, :limit, false) === true && get(io, :compact, false) === true ||
+        print(io, "ISBN ")
+    shortcode(io, isbn)
+end
+
+function shortcode(io::IO, isbn::ISBN)
+    ean12 = idcode(isbn.code)
+    code3, code9 = divrem(ean12, 10^9)
+    # ISBN-13 gets the 3-digit prefix; ISBN-10 omits it
+    !isbn.is10 && print(io, lpad(code3, 3, '0'), '-')
+    # code10 = 9-digit body + check digit (10 digits total for hyphenation lookup)
+    code10 = code9 * 10 + idchecksum(isbn.code)
+    # Find group length
+    first7 = code10 ÷ 1000
+    group_length = 0
+    for (prefix, class) in ISBN_GROUP_HYPHENATION
+        prefix == code3 || continue
+        for (len, range) in class
+            len > 0 && first(range) ≤ first7 ≤ last(range) || continue
+            group_length = len
+            break
+        end
+        group_length > 0 && break
+    end
+    # Extract group and remaining digits
+    codegroup, remaining_after_group = if group_length > 0
+        divrem(code10, 10^(10 - group_length))
+    else
+        0, code10
+    end
+    group_length > 0 && print(io, lpad(codegroup, group_length, '0'), '-')
+    # Find publisher length
+    remaining_digits = 10 - group_length
+    remaining_padded = if remaining_digits < 7
+        remaining_after_group * 10^(7 - remaining_digits)
+    else
+        remaining_after_group ÷ 10^(remaining_digits - 7)
+    end
+    publisher_length = 0
+    for (prefix, classes) in ISBN_PUB_HYPHENATION
+        prefix == code3 || continue
+        for (group_code, class) in classes
+            group_code == codegroup || continue
+            for (len, range) in class
+                len > 0 && first(range) ≤ remaining_padded ≤ last(range) || continue
+                publisher_length = len
+                break
+            end
+            publisher_length > 0 && break
+        end
+        publisher_length > 0 && break
+    end
+    # Extract publisher, title, and check digit
+    publisher, title_and_check = if publisher_length > 0
+        divrem(remaining_after_group, 10^(remaining_digits - publisher_length))
+    else
+        0, remaining_after_group
+    end
+    publisher_length > 0 && print(io, lpad(publisher, publisher_length, '0'), '-')
+    title, check_digit = if title_and_check >= 10
+        divrem(title_and_check, 10)
+    else
+        0, title_and_check
+    end
+    title_length = remaining_digits - publisher_length - 1
+    title_length ∈ 1:9 && print(io, lpad(title, title_length, '0'), '-')
+    # ISBN-10 uses its own check digit (may be X), ISBN-13 uses EAN check
+    if isbn.is10
+        c = isbn10_checkdigit(code9)
+        print(io, if c == 10 'X' else Char('0' + c) end)
+    else
+        print(io, Char('0' + check_digit))
+    end
+end
+
+
+## ISNI
+
+"""
+    ISNI <: AcademicIdentifier
+
+An **International Standard Name Identifier** (ISNI, ISO 27729) uniquely
+identifies natural persons and organisations engaged in creative activities.
+
+It is a **16-character string** formed by a 15-digit base number followed by
+a single checksum digit calculated with the ISO 7064 *MOD 11-2* algorithm.
+The check digit can be **0–9** or **`X`** (representing the value 10).
+
+Standardised in [ISO 27729](https://www.iso.org/standard/87177.html)
+
+## Examples
+```julia-repl
+julia> parse(ISNI, "0000 0001 2103 2683")
+ISNI:0000 0001 2103 2683
+
+julia> parse(ISNI, "https://isni.org/isni/0000000121032683")
+ISNI:0000 0001 2103 2683
+```
+"""
+@defid(ISNI <: AcademicIdentifier,
+       (skip(choice("isni:", "isni ")),
+        :code(digits(15, pad=15, skip=" ", groups=4)),
+        checkdigit(:code, mod11_2)),
+       prefix="ISNI ", purlprefix="https://isni.org/isni/")
+
+# ISNI PURLs use the compact (unspaced) form
+function FastIdentifiers.purl(isni::ISNI)
+    check = if idchecksum(isni) == 10 "X" else string(idchecksum(isni)) end
+    string(purlprefix(ISNI), lpad(idcode(isni), 15, '0'), check)
+end
+
+
+## ISSN
+
+"""
+    ISSN <: AcademicIdentifier
+
+An International Standard Serial Number (ISSN) is a unique identifier for serial publications.
+
+Standardised in [ISO 3297](https://www.iso.org/standard/84536.html) and
+managed by the [ISSN International Centre](https://www.issn.org/), an ISSN
+consists of seven digits followed by a check digit (0–9 or `X`) computed with
+a weighted mod-11 algorithm. The canonical display form groups the digits as
+`NNNN-NNNC`. ISSNs are used to identify journals, newspapers, and other
+periodicals regardless of medium.
+
+# Examples
+
+```julia-repl
+julia> parse(ISSN, "1095-5054")
+ISSN:1095-5054
+
+julia> string(parse(ISSN, "10955054"))
+"ISSN 1095-5054"
+
+julia> purl(parse(ISSN, "1095-5054"))
+"https://portal.issn.org/resource/ISSN/1095-5054"
+```
+"""
+@defid(ISSN <: AcademicIdentifier,
+       (skip(choice("issn:", "issn ", "issn")),
+        :code(digits(7, pad=7, skip="-", groups=4)),
+        checkdigit(:code, issn_mod11)),
+       prefix="ISSN ", purlprefix="https://portal.issn.org/resource/ISSN/")
+
+
+## OCN
 
 """
     OCN <: AcademicIdentifier
@@ -460,19 +622,24 @@ struct OCN <: AcademicIdentifier
     id::UInt64
 end
 
-function parseid(::Type{OCN}, id::SubString)
-    isempty(id) && return MalformedIdentifier{OCN}(id, "cannot be empty")
+function Base.parse(::Type{OCN}, id::AbstractString)
+    id = SubString(string(id))
+    isempty(id) && throw(MalformedIdentifier{OCN}(id, "cannot be empty"))
     if first(id) == '('
-        _, id = lchopfolded(id, "(ocolc)")
+        _, id = chopprefixes(id, "(ocolc)")
     end
     if !digitstart(id)
-        _, id = lchopfolded(id, "ocn:", "oclc:", "ocolc", "oclc", "ocm", "ocn", "on", "https://", "www.", "worldcat.org/oclc/")
+        _, id = chopprefixes(id, "ocn:", "oclc:", "ocolc", "oclc", "ocm", "ocn", "on", "https://", "www.", "worldcat.org/oclc/")
     end
     id = lstrip(id)
-    all(isdigit, id) || return MalformedIdentifier{OCN}(id, "must only consist of digits")
-    num = parsefor(OCN, UInt64, id)
-    num isa UInt64 || return num
+    all(isdigit, id) || throw(MalformedIdentifier{OCN}(id, "must only consist of digits"))
+    num = tryparse(UInt64, id)
+    isnothing(num) && throw(MalformedIdentifier{OCN}(id, "must contain only digits"))
     OCN(num)
+end
+
+function Base.tryparse(::Type{OCN}, id::AbstractString)
+    try parse(OCN, id) catch e; e isa MalformedIdentifier || rethrow(); nothing end
 end
 
 purlprefix(::Type{OCN}) = "https://worldcat.org/oclc/"
@@ -488,264 +655,164 @@ function Base.print(io::IO, ocn::OCN)
 end
 
 
-# ORCID
+## OpenAlexID
 
-"""
-    ORCID <: AcademicIdentifier
+@defid(GenericOpenAlexID <: AcademicIdentifier,
+       (skip(choice("openalex:", "OpenAlex:"),
+             choice("https://", "http://"),
+             choice("www.openalex.org/", "openalex.org/"),
+             choice("works/", "authors/", "sources/", "institutions/",
+                    "concepts/", "publishers/", "funders/")),
+        :category(choice("W", "A", "S", "I", "C", "P", "F")),
+        :num(digits(1:18))))
 
-An Open Researcher and Contributor ID (ORCID) is a unique identifier for researchers and contributors
-to academic works. It consists of a 16-digit integer with a checksum digit.
-
-Invalid ORCID identifiers will throw a `MalformedIdentifier` exception, and identifiers with an
-incorrect checksum will throw a `ChecksumViolation` exception.
-
-# Examples
-
-```julia-repl
-julia> parse(ORCID, "https://orcid.org/0000-0001-5109-3700")
-ORCID:https://orcid.org/0000-0001-5109-3700
-
-julia> println(parse(ORCID, "0000-0001-5109-3700"))
-https://orcid.org/0000-0001-5109-3700
-
-julia> parse(ORCID, "0000-0001-5109-3701")
-ERROR: Checksum violation: the correct checksum for ORCID identifier 15109370 is 0 but got 1
-```
-"""
-struct ORCID <: AcademicIdentifier
-    id::UInt64
-    function ORCID(id::Union{Int64, UInt64})
-        id >= 0 || throw(MalformedIdentifier{ORCID}(id, "must be a non-negative integer"))
-        ndigits(id) <= 15 || throw(MalformedIdentifier{ORCID}(id, "must be a 16-digit integer"))
-        i7064check = iso7064mod11m2checksum(id)
-        oid = UInt64(id) + UInt64(i7064check) << 60
-        new(oid)
-    end
-end
-
-function parseid(::Type{ORCID}, id::SubString)
-    if !digitstart(id)
-        _, id = lchopfolded(id, "orcid:", "orcid ", "https://", "http://", "orcid.org/")
-    end
-    code = parsedashcode(UInt64, id, '-')
-    isnothing(code) && return MalformedIdentifier{ORCID}(id, "must only consist of digits and hyphens")
-    1 <= code.ndigits <= 15 ||
-        return MalformedIdentifier{ORCID}(id, "must be a 2-16 digit identifier")
-    try ORCID(code.num, code.check) catch e; e end
-end
-
-idcode(orcid::ORCID) = Int(orcid.id & 0x003fffffffffffff)
-idchecksum(orcid::ORCID) = (orcid.id >> 60) % UInt8
-
-function shortcode(io::IO, orcid::ORCID)
-    idstr, check = string(idcode(orcid)), idchecksum(orcid)
-    join(io, Iterators.partition(lpad(idstr, 15, '0'), 4), '-')
-    print(io, '0' + ifelse(check == 0xa, 0x28, check))
-end
-
-purlprefix(::Type{ORCID}) = "https://orcid.org/"
-Base.show(io::IO, orcid::ORCID) = (show(io, ORCID); show(io, (idcode(orcid), idchecksum(orcid))))
-
-
-# OpenAlex
+purlprefix(::Type{GenericOpenAlexID}) = "https://openalex.org/"
 
 """
     OpenAlexID{kind} <: AcademicIdentifier
 
-An OpenAlex identifier is a primary key for resources in the OpenAlex database.
+An [OpenAlex](https://openalex.org/) identifier for entities in the OpenAlex scholarly metadata database.
 
-It consists of a category prefix (a single letter) followed by positive integer.
-Currently, OpenAlex defines seven entity categories:
-- **W** for works
-- **A** for authors
-- **S** for sources
-- **I** for institutions
-- **C** for concepts
-- **P** for publishers
-- **F** for funders
-
-Invalid OpenAlex identifiers will throw a `MalformedIdentifier` exception.
+Operated by [OurResearch](https://ourresearch.org/), OpenAlex provides free
+and open bibliographic data. Each identifier consists of a single-letter
+category prefix followed by a positive integer. The seven entity categories
+are: **W** (works), **A** (authors), **S** (sources), **I** (institutions),
+**C** (concepts), **P** (publishers), and **F** (funders).
 
 # Examples
 
 ```julia-repl
-julia> parse(OpenAlexID{:W}, "W2741809807")
+julia> parse(OpenAlexID, "W2741809807")
+OpenAlexID:W2741809807
 
 julia> parse(OpenAlexID, "A5092938886")
-OpenAlexID:A2741809807
+OpenAlexID:A5092938886
 
 julia> purl(parse(OpenAlexID, "W2741809807"))
 "https://openalex.org/W2741809807"
 ```
 """
 struct OpenAlexID{kind} <: AcademicIdentifier
-    num::UInt64
+    inner::GenericOpenAlexID
 end
 
-function parseid(::Type{OpenAlexID{kind}}, id::SubString) where {kind}
-    isempty(id) && return MalformedIdentifier{OpenAlexID{kind}}(id, "cannot be empty")
-    klower, kupper = codeunit(String(kind), 1) | 0x20, codeunit(String(kind), 1)
-    if codeunit(id, 1) ∉ (klower, kupper)
-        _, id = lchopfolded(id, "openalex:", "https://", "http://", "openalex.org/")
-        prefixend = findfirst('/', id)
-        if !isnothing(prefixend)
-            id = unsafe_substr(id, prefixend)
+OpenAlexID{kind}(num::Integer) where {kind} =
+    OpenAlexID{kind}(GenericOpenAlexID(kind, num))
+
+function Base.parse(::Type{OpenAlexID{kind}}, id::AbstractString) where {kind}
+    inner = parse(GenericOpenAlexID, id)
+    Symbol(inner.category) == kind ||
+        throw(MalformedIdentifier{OpenAlexID{kind}}(id, 1, "kind does not match"))
+    OpenAlexID{kind}(inner)
+end
+
+function Base.parse(::Type{OpenAlexID}, id::AbstractString)
+    inner = parse(GenericOpenAlexID, id)
+    OpenAlexID{Symbol(inner.category)}(inner)
+end
+
+function Base.tryparse(::Type{OpenAlexID{kind}}, id::AbstractString) where {kind}
+    inner = tryparse(GenericOpenAlexID, id)
+    isnothing(inner) && return nothing
+    Symbol(inner.category) == kind || return nothing
+    OpenAlexID{kind}(inner)
+end
+
+function Base.tryparse(::Type{OpenAlexID}, id::AbstractString)
+    inner = tryparse(GenericOpenAlexID, id)
+    isnothing(inner) && return nothing
+    OpenAlexID{Symbol(inner.category)}(inner)
+end
+
+function Base.show(io::IO, @nospecialize(id::OpenAlexID))
+    if get(io, :limit, false) === true
+        if get(io, :typeinfo, Nothing) != typeof(id)
+            print(io, "OpenAlexID:")
         end
-        isempty(id) && return MalformedIdentifier{OpenAlexID{kind}}(id, "must include a kind prefix")
-        codeunit(id, 1) | 0x20 == klower ||
-            return MalformedIdentifier{OpenAlexID{kind}}(id, "kind does not match")
+        shortcode(io, id)
+    else
+        print(io, "OpenAlexID{:", id.inner.category, "}(", id.inner.num, ')')
     end
-    id = unsafe_substr(id, 1)
-    num = parsefor(OpenAlexID{kind}, UInt64, id)
-    num isa UInt64 || return num
-    OpenAlexID{kind}(num)
 end
 
-function parseid(::Type{OpenAlexID}, id::SubString)
-    isempty(id) && return MalformedIdentifier{OpenAlexID}(id, "cannot be empty")
-    kindchar = codeunit(id.string, 1) & ~0x20
-    if kindchar ∉ map(UInt8, ('W', 'A', 'S', 'I', 'C', 'P', 'F'))
-        _, id = lchopfolded(id, "openalex:", "https://", "http://", "openalex.org/")
-        prefixend = findfirst('/', id)
-        if !isnothing(prefixend)
-            id = unsafe_substr(id, prefixend)
-        end
-        isempty(id) && return MalformedIdentifier{OpenAlexID}(id, "must include a kind prefix")
-        ncodeunits(id) == 1 && return MalformedIdentifier{OpenAlexID}(id, "must include a number after the kind prefix")
-        kindchar = codeunit(id, 1) & ~0x20
-        kindchar ∈ map(UInt8, ('W', 'A', 'S', 'I', 'C', 'P', 'F')) ||
-            return MalformedIdentifier{OpenAlexID}(id, "unrecognised kind prefix")
-    end
-    num = parsefor(OpenAlexID, UInt64, unsafe_substr(id, 1))
-    num isa UInt64 || return num
-    OpenAlexID{Symbol(Char(kindchar & ~0x20))}(num)
-end
-
-shortcode(io::IO, id::OpenAlexID{kind}) where {kind} = print(io, kind, id.num)
-purlprefix(@nospecialize(::OpenAlexID)) = "https://openalex.org/"
+Base.isless(@nospecialize(a::OpenAlexID), @nospecialize(b::OpenAlexID)) = isless(a.inner, b.inner)
+Base.write(io::IO, @nospecialize(id::OpenAlexID)) = write(io, id.inner)
+Base.string(@nospecialize(id::OpenAlexID)) = shortcode(id)
+shortcode(io::IO, @nospecialize(id::OpenAlexID)) = shortcode(io, id.inner)
+shortcode(@nospecialize(id::OpenAlexID)) = shortcode(id.inner)
+purlprefix(@nospecialize(_::Type{<:OpenAlexID})) = purlprefix(GenericOpenAlexID)
+idcode(@nospecialize(id::OpenAlexID)) = id.num
 
 
-# RAiD
+## ORCID
 
 """
-    RAiD <: AcademicIdentifier
+    ORCID <: AcademicIdentifier
 
-A Research Activity Identifier (RAiD) is a unique identifier for research activities.
+An Open Researcher and Contributor ID (ORCID) is a persistent identifier for researchers and scholarly contributors.
 
-All RAiDs have a corresponding DOI, which can be obtained by converting to a `DOI`.
-
-Standardised in [ISO 23527](https://www.iso.org/standard/75931.html).
+Operated by [ORCID, Inc.](https://orcid.org/) and conforming to
+[ISO 27729](https://www.iso.org/standard/44292.html) (ISNI), an ORCID
+consists of 15 base digits followed by an ISO 7064 MOD 11-2 check character
+(0–9 or `X`), displayed in four groups of four separated by hyphens
+(e.g. `0000-0001-5109-3700`). The ORCID consortium specifies the full
+`https://orcid.org/` URL as the canonical representation.
 
 # Examples
 
 ```julia-repl
-julia> parse(RAiD, "10.25.10.1234/a1b2c")
-RAiD:10.25.10.1234/a1b2c
+julia> parse(ORCID, "https://orcid.org/0000-0001-5109-3700")
+ORCID:0000-0001-5109-3700
 
-julia> parse(RAiD, "https://raid.org/10.25.10.1234/a1b2c")
-RAiD:10.25.10.1234/a1b2c
+julia> shortcode(parse(ORCID, "0000-0001-5109-3700"))
+"0000-0001-5109-3700"
 
-julia> print(parse(RAiD, "10.25.10.1234/a1b2c"))
-https://raid.org/10.25.10.1234/a1b2c
+julia> println(parse(ORCID, "0000-0001-5109-3700"))
+https://orcid.org/0000-0001-5109-3700
 ```
 """
-struct RAiD <: AcademicIdentifier
-    id::DOI
-end
-
-Base.convert(::Type{DOI}, raid::RAiD) = raid.id
-
-function parseid(::Type{RAiD}, id::SubString)
-    chopped, id = lchopfolded(id, "raid:")
-    if !chopped
-        _, id = lchopfolded(id, "https://", "http://", "raid.org/")
-    end
-    doi = parseid(DOI, id)
-    doi isa DOI || return doi
-    RAiD(doi)
-end
-
-purlprefix(::Type{RAiD}) = "https://raid.org/"
-
-Base.:(==)(a::RAiD, b::RAiD) = a.id == b.id
-Base.hash(raid::RAiD, h::UInt) = hash(raid.id, h)
+@defid(ORCID <: AcademicIdentifier,
+       (skip("orcid:"),
+        :code(digits(15, pad=15, skip="-", groups=4)),
+        checkdigit(:code, mod11_2)),
+       purlprefix="https://orcid.org/")
 
 
-# ROR
-
-Base.@assume_effects :foldable function croc32decode(::Type{T}, str::AbstractString) where {T <: Integer}
-    svec = codeunits(str) .| 0x20 # Assume letters, convert to lowercase
-    skipchars = UInt8.(('i', 'l', 'o', 'u'))
-    svec .= svec .- (UInt8(count(s .> skipchars)) for s in svec)
-    parse(T, String(svec), base=32)
-end
-
-Base.@assume_effects :foldable function croc32encode(num::Integer)
-    svec = collect(codeunits(string(num, base=32)))
-    skipchars = UInt8.(('i', 'l'-1, 'o'-2, 'u'-3))
-    svec .= svec .+ (UInt8(count(s .>= skipchars)) for s in svec)
-    String(svec)
-end
+## PMCID
 
 """
-    ROR <: AcademicIdentifier
+    PMCID <: AcademicIdentifier
 
-A Research Organization Registry (ROR) identifier is a unique identifier for research organizations.
-It consists of a 6-digit integer with a checksum digit.
+A PubMed Central Identifier (PMCID) is a unique identifier for a publication in the
+PubMed Central database. It consists of an 8-digit integer. Invalid PMCIDs will throw a
+`MalformedIdentifier` exception.
 
-Invalid ROR identifiers will throw a `MalformedIdentifier` exception, and identifiers with an
-incorrect checksum will throw a `ChecksumViolation` exception.
+PMCID identifiers should not be confused with PubMed identifiers ([`PMID`](@ref)s),
+which are specifically used by PubMed but are distinct from PMCIDs.
 
 # Examples
 
 ```julia-repl
-julia> parse(ROR, "https://ror.org/05cy4wa09")
-ROR:05cy4wa09
+julia> parse(PMCID, "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12345678")
+PMCID:12345678
 
-julia> print(parse(ROR, "05cy4wa09"))
-https://ror.org/05cy4wa09
+julia> println(PMCID(12345678))
+PMC12345678
 
-julia> parse(ROR, "05cy4wa08")
-ERROR: Checksum violation: the correct checksum for ROR identifier 05cy4wa is 9 but got 8
+julia> PMCID(123456789)
+ERROR: ArgumentError: Value 123456789 is above maximum 99999999
 ```
 """
-struct ROR <: AcademicIdentifier
-    num::Int32
-    function ROR(num::Integer)
-        num >= 0 || throw(MalformedIdentifier{ROR}(num, "must be a non-negative value"))
-        num <= croc32decode(Int, "zzzzzz") || throw(MalformedIdentifier{ROR}(croc32encode(num), "must be no more than 6-digits"))
-        new(Int32(num))
-    end
-end
+@defid(PMCID <: AcademicIdentifier,
+       (skip(choice("https://", "http://"), choice("www.", "pmc."),
+             "ncbi.nlm.nih.gov/pmc/articles/"),
+        skip("pmcid:", " "), skip(print="PMC"), :id(digits(1:8))))
 
-function ROR(num::Integer, check::Integer)
-    ror = ROR(num)
-    check == idchecksum(ror) ||
-        throw(ChecksumViolation{ROR}('0' * croc32encode(num), idchecksum(ror), check))
-    ror
-end
-
-function parseid(::Type{ROR}, num::SubString)
-    chopped, num = lchopfolded(num, "ror:")
-    if !chopped
-        _, num = lchopfolded(num, "ror.org/", "https://ror.org/")
-    end
-    length(num) == 9 || return MalformedIdentifier{ROR}(num, "must be 9 characters long")
-    char0, rest... = num
-    char0 == '0' || return MalformedIdentifier{ROR}(num, "must start with '0'")
-    all(c -> c ∈ 'a':'z' || c ∈ 'A':'Z' || c ∈ '0':'9', rest) || return MalformedIdentifier{ROR}(num, "must only contain alphanumeric characters")
-    check = parsefor(ROR, UInt, view(rest, 7:8))
-    check isa UInt || return check
-    try ROR(croc32decode(Int, view(rest, 1:6)), check) catch e; e end
-end
-
-idcode(ror::ROR) = ror.num
-idchecksum(ror::ROR) = 98 - ((ror.num * 100) % 97)
-shortcode(io::IO, ror::ROR) = print(io, '0', lpad(croc32encode(ror.num), 6, '0'), lpad(string(idchecksum(ror)), 2, '0'))
-purlprefix(::Type{ROR}) = "https://ror.org/"
+FastIdentifiers.idprefix(::Type{PMCID}) = nothing
+purlprefix(::Type{PMCID}) = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
 
 
-# PMID
+## PMID
 
 """
     PMID <: AcademicIdentifier
@@ -767,442 +834,111 @@ julia> parse(PMID, "https://pubmed.ncbi.nlm.nih.gov/28984872")
 PMID:28984872
 
 julia> PMID(123456789)
-ERROR: Malformed identifier: PMID identifier 123456789 must be no more than 8 digits
+ERROR: ArgumentError: Value 123456789 is above maximum 99999999
 ```
 """
-struct PMID <: AcademicIdentifier
-    id::UInt
-    function PMID(id::Union{Int, UInt})
-        id >= 0 || throw(MalformedIdentifier{PMID}(id, "must be a non-negative value"))
-        id <= 10^8 || throw(MalformedIdentifier{PMID}(id, "must be no more than 8 digits"))
-        new(UInt(id))
-    end
-end
-
-function parseid(::Type{PMID}, id::SubString)
-    _, id = lchopfolded(id, "pmid:", " ", "https://", "http://", "www.", "pubmed.ncbi.nlm.nih.gov/")
-    pint = parsefor(PMID, UInt, id)
-    pint isa UInt || return pint
-    try PMID(pint) catch e; e end
-end
-
-purlprefix(::Type{PMID}) = "https://pubmed.ncbi.nlm.nih.gov/"
-
-function Base.print(io::IO, pmid::PMID)
-    get(io, :limit, false) === true && get(io, :compact, false) === true ||
-        print(io, "PMID:")
-    print(io, pmid.id)
-end
+@defid(PMID <: AcademicIdentifier,
+       (skip("pmid:", " "), :id(digits(1:8))),
+       prefix="", purlprefix="https://pubmed.ncbi.nlm.nih.gov/")
 
 
-# PMCID
+## RAiD
 
 """
-    PMCID <: AcademicIdentifier
+    RAiD <: AcademicIdentifier
 
-A PubMed Central Identifier (PMCID) is a unique identifier for a publication in the
-PubMed Central database. It consists of an 8-digit integer. Invalid PMCIDs will throw a
-`MalformedIdentifier` exception.
+A Research Activity Identifier (RAiD) is a persistent identifier for research projects and activities.
 
-PMCID identifiers should not be confused with PubMed identifiers ([`PMID`](@ref)s),
-which are specifically used by PubMed but are distinct from PMCIDs.
+Standardised in [ISO 23527](https://www.iso.org/standard/75931.html) and
+operated by the [Australian Research Data Commons](https://www.raid.org.au/),
+RAiDs link together the people, organisations, outputs, and funding associated
+with a research activity. Each RAiD is implemented as a [`DOI`](@ref) and can
+be converted to one via `convert(DOI, raid)`.
 
 # Examples
 
 ```julia-repl
-julia> parse(PMCID, "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC012345678")
-PMCID:12345678
+julia> parse(RAiD, "10.25.10.1234/a1b2c")
+RAiD:10.25.10.1234/a1b2c
 
-julia> println(PMCID(12345678))
-PMC12345678
+julia> parse(RAiD, "https://raid.org/10.25.10.1234/a1b2c")
+RAiD:10.25.10.1234/a1b2c
 
-julia> PMCID(123456789)
-ERROR: Malformed identifier: PMCID identifier 123456789 must be no more than 8 digits
+julia> print(parse(RAiD, "10.25.10.1234/a1b2c"))
+https://raid.org/10.25.10.1234/a1b2c
 ```
 """
-struct PMCID <: AcademicIdentifier
-    id::UInt
-    function PMCID(id::Union{Int, UInt})
-        id >= 0 || throw(MalformedIdentifier{PMCID}(id, "must be a non-negative value"))
-        id <= 10^8 || throw(MalformedIdentifier{PMCID}(id, "must be no more than 8 digits"))
-        new(UInt(id))
+struct RAiD <: AcademicIdentifier
+    id::DOI
+end
+
+Base.convert(::Type{DOI}, raid::RAiD) = raid.id
+
+function Base.parse(::Type{RAiD}, id::AbstractString)
+    id = SubString(string(id))
+    chopped, id = chopprefixes(id, "raid:")
+    if !chopped
+        _, id = chopprefixes(id, "https://", "http://", "raid.org/")
     end
+    RAiD(parse(DOI, id))
 end
 
-function parseid(::Type{PMCID}, id::SubString)
-    _, id = lchopfolded(id, "pmcid:", " ", "https://", "http://", "www.", "pmc.", "ncbi.nlm.nih.gov/pmc/articles/", "pmc")
-    pint = parsefor(PMCID, UInt, id)
-    pint isa UInt || return pint
-    try PMCID(pint) catch e; e end
+function Base.tryparse(::Type{RAiD}, id::AbstractString)
+    try parse(RAiD, id) catch e; e isa MalformedIdentifier || rethrow(); nothing end
 end
 
-shortcode(io::IO, pmcid::PMCID) = print(io, "PMC", pmcid.id)
-purlprefix(::Type{PMCID}) = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
+purlprefix(::Type{RAiD}) = "https://raid.org/"
 
-Base.print(io::IO, pmcid::PMCID) = print(io, "PMC", pmcid.id)
+Base.:(==)(a::RAiD, b::RAiD) = a.id == b.id
+Base.hash(raid::RAiD, h::UInt) = hash(raid.id, h)
 
 
-# ISNI
+## ROR
 
 """
-    ISNI <: AcademicIdentifier
+    ROR <: AcademicIdentifier
 
-An **International Standard Name Identifier** (ISNI, ISO 27729) uniquely
-identifies natural persons and organisations engaged in creative activities.
+A Research Organization Registry (ROR) identifier is a persistent identifier for research organisations.
 
-It is a **16-character string** formed by a 15-digit base number followed by
-a single checksum digit calculated with the ISO 7064 *MOD 11-2* algorithm.
-The check digit can be **0–9** or **`X`** (representing the value 10).
-
-Standardised in [ISO 27729](https://www.iso.org/standard/87177.html)
-
-## Examples
-```julia-repl
-julia> parse(ISNI, "0000 0001 2103 2683")
-ISNI:0000 0001 2103 2683
-
-julia> parse(ISNI, "https://isni.org/isni/0000000121032683")
-ISNI:0000 0001 2103 2683
-```
-"""
-struct ISNI <: AcademicIdentifier
-    code::UInt64
-    function ISNI(id::Union{Int64, UInt64})
-        ndigits(id) <= 15 || throw(MalformedIdentifier{ISNI}(id, "must be a 15-digit integer"))
-        check = iso7064mod11m2checksum(id)
-        new(UInt64(id) + UInt64(check) << 60)
-    end
-end
-
-function parseid(::Type{ISNI}, id::SubString)
-    if !digitstart(id)
-        chopped, id = lchopfolded(id, "isni:", "isni ")
-        if chopped
-            id = lstrip(id)
-        else
-            _, id = lchopfolded(id, "https://", "http://", "www.",
-                                "isni.org/isni/", "isni.org/", "isni",
-                                "viaf.org/viaf/sourceID/ISNI%7C", "viaf.org/processed/ISNI%7C")
-        end
-    end
-    code = parsedashcode(UInt64, id, ' ')
-    isnothing(code) && return MalformedIdentifier{ISNI}(id, "must only consist of digits and spaces")
-    1 <= code.ndigits <= 15 ||
-        return MalformedIdentifier{ISNI}(id, "must be a 2-16 character string")
-    code.check <= 0xa ||
-        return MalformedIdentifier{ISNI}(id, "check digit must be 0-9 or X")
-    try ISNI(code.num, code.check) catch e; e end
-end
-
-idcode(isni::ISNI) = Int(isni.code & 0x003fffffffffffff)
-idchecksum(isni::ISNI) = (isni.code >> 60) % UInt8
-
-function shortcode(io::IO, isni::ISNI)
-    idstr, check = string(idcode(isni)), idchecksum(isni)
-    join(io, Iterators.partition(lpad(idstr, 15, '0'), 4), ' ')
-    print(io, '0' + ifelse(check == 0xa, 0x28, check))
-end
-
-purl(isni::ISNI) = string(
-    "https://isni.org/isni/",
-    '0' ^ (15 - ndigits(idcode(isni))),
-    idcode(isni),
-    if idchecksum(isni) == 10 "X" else
-        string(idchecksum(isni)) end)
-
-
-# ISSN
-
-"""
-    ISSN <: AcademicIdentifier
-
-An International Standard Serial Number (ISSN) is a unique identifier for serial
-publications.
-
-It consists of a 7-digit integer with a checksum digit, and is standerdised in [ISO 3297](https://www.iso.org/standard/84536.html).
-
-Invalid ISSNs will throw a `MalformedIdentifier` exception, and identifiers with
-an incorrect checksum will throw a `ChecksumViolation` exception.
+Operated by [ROR](https://ror.org/) as an open community-led registry, ROR
+IDs provide a stable reference for affiliations in scholarly metadata. Each
+identifier consists of a leading `0`, six Crockford base-32 characters, and a
+two-digit ISO 7064 MOD 97-10 checksum. The full `https://ror.org/` URL is the
+canonical representation.
 
 # Examples
 
 ```julia-repl
-julia> parse(ISSN, "1095-5054")
-ISSN:1095-5054
+julia> parse(ROR, "https://ror.org/05cy4wa09")
+ROR:05cy4wa09
 
-julia> parse(ISSN, "1095-5053")
-ERROR: Checksum violation: the correct checksum for ISSN identifier 1095505 is 4 but got 3
+julia> print(parse(ROR, "05cy4wa09"))
+https://ror.org/05cy4wa09
+
+julia> parse(ROR, "05cy4wa08")
+ERROR: ChecksumViolation{ROR}: expected 09, got 08
 ```
 """
-struct ISSN <: AcademicIdentifier
-    code::UInt32
-    function ISSN(id::Union{UInt32, Int32, UInt64, Int64})
-        ndigits(id) <= 7 || throw(MalformedIdentifier{ISSN}(id, "must be a 7-digit integer"))
-        digsum = 0
-        for (i, dig) in enumerate(digits(id, pad=7))
-            digsum += (i + 1) * dig
-        end
-        checkcalc = (11 - digsum % 11) % 11
-        new(UInt32(id) + UInt32(checkcalc) << 24)
-    end
-end
-
-function parseid(::Type{ISSN}, id::SubString)
-    chopped, id = lchopfolded(id, "issn:", "issn")
-    if chopped
-        id = lstrip(id)
-    else
-        _, id = lchopfolded(id, "https://", "http://", "portal.issn.org/resource/ISSN/")
-    end
-    code = parsedashcode(UInt32, id, '-')
-    isnothing(code) && return MalformedIdentifier{ISSN}(id, "must only consist of digits and hyphens")
-    1 <= code.ndigits <= 7 ||
-        return MalformedIdentifier{ISSN}(code, "must be a 2-8 digit integer")
-    code.check <= 0xa ||
-        return MalformedIdentifier{ISSN}(id, "check digit must be 0-9 or X")
-    try ISSN(code.num, code.check) catch e; e end
-end
-
-idcode(issn::ISSN) = Int(issn.code & 0x00ffffff)
-idchecksum(issn::ISSN) = Int8((issn.code & 0xff000000) >> 24)
-function shortcode(io::IO, issn::ISSN)
-    join(io, Iterators.partition(lpad(string(idcode(issn)), 7, '0'), 4), '-')
-    csum = idchecksum(issn)
-    print(io, '0' + ifelse(csum == 0xa, 0x28, csum))
-end
-purlprefix(::Type{ISSN}) = "https://portal.issn.org/resource/ISSN/"
-
-function Base.print(io::IO, issn::ISSN)
-    get(io, :limit, false) === true && get(io, :compact, false) === true ||
-        print(io, "ISSN ")
-    shortcode(io, issn)
-end
+@defid(ROR <: AcademicIdentifier,
+       (skip("ror:"), "0",
+        :id(charset(6, '0':'9', 'a':'h', 'j':'k', 'm':'n', 'p':'t', 'v':'z',
+                    numeric=true, lower=true)),
+        checkdigit(:id, mod97)),
+       purlprefix="https://ror.org/")
 
 
-# EAN13
-
-"""
-    EAN13 <: AcademicIdentifier
-
-A European Article Number (EAN-13) is a 13-digit barcode standard which is a superset of the
-original 12-digit Universal Product Code (UPC) system. It consists of a 12-digit code with
-a checksum digit calculated using a weighted modulo-10 algorithm.
-
-Invalid EAN-13 identifiers will throw a `MalformedIdentifier` exception, and identifiers with an
-incorrect checksum will throw a `ChecksumViolation` exception.
-
-# Examples
-
-```julia-repl
-julia> parse(EAN13, "9780596520687")
-EAN13:9780596520687
-
-julia> parse(EAN13, "978-0-596-52068-7")
-EAN13:9780596520687
-
-julia> println(parse(EAN13, "9780596520687"))
-9780596520687
-
-julia> parse(EAN13, "9780596520688")
-ERROR: Checksum violation: the correct checksum for EAN13 identifier 978059652068 is 7 but got 8
-```
-"""
-struct EAN13 <: AcademicIdentifier
-    code::UInt64
-    function EAN13(code::Integer)
-        ndigits(code) <= 12 || throw(MalformedIdentifier{EAN13}(code, "must be a 12-digit integer"))
-        digsum = 0
-        for (i, dig) in enumerate(digits(code, pad=12))
-            digsum += if i % 2 == 0 dig else dig * 3 end
-        end
-        checkcalc = (10 - digsum % 10) % 10
-        new(10 * code + checkcalc)
-    end
-    function EAN13((code, flag)::Tuple{<:Integer, UInt16})
-        ean = EAN13(code)
-        new(ean.code | UInt64(flag) << 48)
-    end
-end
-
-function parseid(::Type{EAN13}, id::SubString)
-    code = parsedashcode(UInt64, id, '-')
-    isnothing(code) && return MalformedIdentifier{EAN13}(id, "must only consist of digits and hyphens")
-    code.ndigits > 13 &&
-        return MalformedIdentifier{EAN13}(code, "must be a 13-digit integer")
-    code.check <= 0x9 ||
-        return MalformedIdentifier{EAN13}(id, "check digit must be 0-9")
-    try EAN13(code.num, code.check) catch e; e end
-end
-
-idcode(ean::EAN13) = Int((0x00001fffffffffff & ean.code) ÷ 10)
-idchecksum(ean::EAN13) = Int8(ean.code % 10)
-shortcode(io::IO, ean::EAN13) = print(io, lpad(idcode(ean), 12, '0'), idchecksum(ean))
-
-const IAN = EAN13
-
-
-# ISBN
-
-"""
-    ISBN <: AcademicIdentifier
-
-An International Standard Book Number (ISBN) is a unique identifier for books and book-like
-publications.
-
-Standerdised in [ISO 2108](https://www.iso.org/standard/65483.html), ISBNs
-either consist of a 10-digit integer including a checksum digit, or an
-EAN-13 code starting with 978 or 979.
-
-Invalid ISBNs will throw a `MalformedIdentifier` exception, and identifiers with an incorrect
-checksum will throw a `ChecksumViolation` exception.
-
-# Examples
-
-```julia-repl
-julia> parse(ISBN, "0141439564")
-ISBN("0-14-143956-4")
-
-julia> parse(ISBN, "9781718502765")
-ISBN:978-1-7185-0276-5
-```
-"""
-struct ISBN <: AcademicIdentifier
-    code::EAN13
-end
-
-Base.convert(::Type{EAN13}, isbn::ISBN) = isbn.code
-
-function Base.convert(::Type{ISBN}, ean::EAN13)
-    idcode(ean) ÷ 10^9 ∈ (978, 979) ||
-        throw(MalformedIdentifier{ISBN}(idcode(ean), "must start with 978 or 979"))
-    ISBN(ean)
-end
-
-function ISBN(id::Integer, check::Integer)
-    ndigits(id) == 12 || throw(MalformedIdentifier{ISBN}(id, "must be a 12-digit integer"))
-    id ÷ 10^9 ∈ (978, 979) || throw(MalformedIdentifier{ISBN}(id, "must start with 978 or 979"))
-    ISBN(EAN13(id, check))
-end
-
-function ISBN(id::Integer)
-    ndigits(id) == 12 || throw(MalformedIdentifier{ISBN}(id, "must be a 12-digit integer"))
-    id ÷ 10^9 ∈ (978, 979) || throw(MalformedIdentifier{ISBN}(id, "must start with 978 or 979"))
-    ISBN(EAN13(id))
-end
-
-function parseid(::Type{ISBN}, id::SubString)
-    _, id = lchopfolded(id, "isbn:", "isbn")
-    ncode = sum(c -> c ∉ (UInt8(' '), UInt8('-')), codeunits(id), init=0)
-    if ncode == 13
-        code = parsedashcode(UInt64, id, ('-', ' '))
-        isnothing(code) && return MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens")
-        code.check <= 0x9 || return MalformedIdentifier{ISBN}(id, "check digit must be 0-9")
-        try ISBN(code.num, code.check) catch e; e end
-    elseif ncode == 10
-        code = parsedashcode(UInt64, id, ('-', ' '))
-        isnothing(code) && return MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens")
-        code.check <= 0xa || return MalformedIdentifier{ISBN}(id, "check digit must be 0-9 or X")
-        csum = 0
-        for (i, digit) in enumerate(digits(code.num * 10, pad=10))
-            csum += i * digit
-        end
-        cdigit = 0xb - mod1(csum, 0xb)
-        cdigit == code.check ||
-            return ChecksumViolation{ISBN}(id, cdigit, code.check)
-        try ISBN(EAN13((code.num, 0x1000 | UInt8(cdigit)))) catch e; e end
-    else
-        return MalformedIdentifier{ISBN}(id, "must be a 10 or 13-digit integer")
-    end
-end
-
-function Base.print(io::IO, isbn::ISBN)
-    get(io, :limit, false) === true && get(io, :compact, false) === true ||
-        print(io, "ISBN ")
-    shortcode(io, isbn)
-end
-
-function shortcode(io::IO, isbn::ISBN)
-    flag = UInt16((isbn.code.code & UInt64(0xffff) << 48) >> 48)
-    code3, code10 = if iszero(flag)
-        divrem(isbn.code.code, 10^10)
-    else
-        978, idcode(isbn.code) * 10 + idchecksum(isbn.code)
-    end
-    iszero(flag) && print(io, lpad(code3, 3, '0'), '-')
-    # Find group length by checking which range the first 7 digits fall into
-    first7 = code10 ÷ 1000
-    group_length = 0
-    for (prefix, class) in ISBN_GROUP_HYPHENATION
-        prefix == code3 || continue
-        for (len, range) in class
-            len > 0 && first(range) ≤ first7 ≤ last(range) || continue
-            group_length = len
-            break
-        end
-        group_length > 0 && break
-    end
-    # Extract group and remaining digits using arithmetic
-    codegroup, remaining_after_group = if group_length > 0
-        divrem(code10, 10^(10 - group_length))
-    else
-        0, code10
-    end
-    group_length > 0 && print(io, lpad(codegroup, group_length, '0'), '-')
-    # Find publisher length by checking which range the remaining digits fall into
-    remaining_digits = 10 - group_length
-    remaining_padded = if remaining_digits < 7
-        remaining_after_group * 10^(7 - remaining_digits)
-    else
-        remaining_after_group ÷ 10^(remaining_digits - 7)
-    end
-    publisher_length = 0
-    for (prefix, classes) in ISBN_PUB_HYPHENATION
-        prefix == code3 || continue
-        for (group_code, class) in classes
-            group_code == codegroup || continue
-            for (len, range) in class
-                len > 0 && first(range) ≤ remaining_padded ≤ last(range) || continue
-                publisher_length = len
-                break
-            end
-            publisher_length > 0 && break
-        end
-        publisher_length > 0 && break
-    end
-    # Extract publisher, title, and check digit using mathematical operations
-    publisher, title_and_check = if publisher_length > 0
-        divrem(remaining_after_group, 10^(remaining_digits - publisher_length))
-    else
-        0, remaining_after_group
-    end
-    publisher_length > 0 && print(io, lpad(publisher, publisher_length, '0'), '-')
-    # Split title and check digit
-    if title_and_check >= 10
-        title, check_digit = divrem(title_and_check, 10)
-    else
-        title, check_digit = 0, title_and_check
-    end
-    title_length = remaining_digits - publisher_length - 1
-    title_length ∈ 1:9 && print(io, lpad(title, title_length, '0'), '-')
-    check = if iszero(flag)
-        Char(0x30 + check_digit)
-     else
-        check_char = Int8(flag & 0x00ff)
-        '0' + ifelse(check_char == 0xa, 0x28, check_char)
-    end
-    print(io, check)
-end
-
-
-# VIAF
+## VIAF
 
 """
     VIAF <: AcademicIdentifier
 
-A **V**irtual **I**nternational **A**uthority **F**ile identifier is a numeric
-key used by libraries to disambiguate persons, corporate bodies, and works.
+A Virtual International Authority File (VIAF) identifier is a numeric key for authority records in the library domain.
 
-Invalid inputs throw `MalformedIdentifier{VIAF}`.
+Hosted by [OCLC](https://www.oclc.org/) at [viaf.org](https://viaf.org/),
+VIAF links the national authority files of libraries worldwide into a single
+virtual authority file. Each VIAF cluster merges records for the same person,
+corporate body, or work from participating institutions (Library of Congress,
+BnF, DNB, etc.), providing a shared identifier for bibliographic entities.
 
 # Examples
 
@@ -1213,37 +949,28 @@ VIAF:113230702
 julia> parse(VIAF, "https://viaf.org/viaf/113230702/")
 VIAF:113230702
 
-julia> parse(VIAF, "VIAF:abc")
-ERROR: Malformed identifier: VIAF identifier abc must contain only digits
+julia> purl(parse(VIAF, "113230702"))
+"https://viaf.org/viaf/113230702"
 ```
 """
-struct VIAF <: AcademicIdentifier
-    id::UInt32
-end
-
-function parseid(::Type{VIAF}, id::AbstractString)
-    chopped, id = lchopfolded(id, "viaf:")
-    if !chopped
-        _, id = lchopfolded(id, "https://", "http://", "viaf.org/viaf/")
-    end
-    all(isdigit, id) ||
-        return MalformedIdentifier{VIAF}(id, "must contain only digits")
-    vid = parsefor(VIAF, UInt32, id)
-    vid isa UInt32 || return vid
-    VIAF(vid)
-end
-
-purlprefix(::Type{VIAF}) = "https://viaf.org/viaf/"
+@defid(VIAF <: AcademicIdentifier,
+       (skip("viaf:"), :id(digits(UInt32)), skip("/")),
+       prefix="", purlprefix="https://viaf.org/viaf/")
 
 
-# Wikidata
+## Wikidata
 
 """
     Wikidata <: AcademicIdentifier
 
-A Wikidata identifier is a unique identifier for entities in the Wikidata knowledge base. It consists
-of a 'Q' followed by an integer. Invalid Wikidata identifiers will throw a `MalformedIdentifier`
-exception.
+A Wikidata identifier (QID) is a unique key for entities in the [Wikidata](https://www.wikidata.org/) knowledge base.
+
+Operated by the [Wikimedia Foundation](https://wikimediafoundation.org/),
+Wikidata is a free, collaborative, multilingual knowledge graph. Each entity
+(item, property, or lexeme) receives a stable QID consisting of `Q` followed
+by a positive integer. QIDs are widely used for authority control, linked
+open data, and scholarly knowledge graphs. Common prefixes `wd:` and
+`wikidata:` are accepted during parsing.
 
 # Examples
 
@@ -1251,29 +978,15 @@ exception.
 julia> parse(Wikidata, "Q42")
 Wikidata:Q42
 
-julia> print(parse(Wikidata, "Q42"))
-Q42
+julia> purl(parse(Wikidata, "Q42"))
+"https://www.wikidata.org/wiki/Q42"
+
+julia> parse(Wikidata, "wd:Q42")
+Wikidata:Q42
 ```
 """
-struct Wikidata <: AcademicIdentifier
-    id::UInt64
-end
-
-function parseid(::Type{Wikidata}, id::SubString)
-    chopped, id = lchopfolded(id, "wikidata:", "wd:")
-    if !chopped
-        _, id = lchopfolded(id, "https://", "http://", "www.", "wikidata.org/wiki/")
-    end
-    if startswith(id, 'Q')
-        wint = parsefor(Wikidata, UInt64, id[2:end])
-        wint isa UInt64 || return wint
-        Wikidata(wint)
-    else
-        MalformedIdentifier{Wikidata}(id, "must start with 'Q'")
-    end
-end
-
-shortcode(io::IO, wd::Wikidata) = print(io, 'Q', wd.id)
-purlprefix(::Type{Wikidata}) = "https://www.wikidata.org/wiki/"
+@defid(Wikidata <: AcademicIdentifier,
+       (skip(choice("wikidata:", "wd:")), "Q", :id(digits(1:18))),
+       prefix="", purlprefix="https://www.wikidata.org/wiki/")
 
 end

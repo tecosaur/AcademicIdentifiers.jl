@@ -4,11 +4,11 @@ version = "0.1.0"
 authors = ["TEC <contact@tecosaur.net>"]
 
 [deps]
-DigitalIdentifiersBase = "4753c187-0528-4cab-a788-b8a80107dae0"
+FastIdentifiers = "4753c187-0528-4cab-a788-b8a80107dae0"
 
 [compat]
-DigitalIdentifiersBase = "1"
-julia = "1.9"
+FastIdentifiers = "1"
+julia = "1.11"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

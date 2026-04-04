@@ -2,30 +2,33 @@
 #+author: tecosaur
 
 #+html: <a href="https://tecosaur.net"><img src="https://img.shields.io/badge/%F0%9F%A6%95-tec-27a560.svg"></a>
-#+html: <a href="https://www.tldrlegal.com/license/mozilla-public-license-2-0-mpl-2"><img src="https://img.shields.io/badge/license-MPL%202.0-teal.svg"></a>
+#+html: <a href="https://tecosaur.github.io/AcademicIdentifiers.jl/stable/"><img src="https://img.shields.io/badge/docs-stable-blue.svg"></a>
+#+html: <a href="https://tecosaur.github.io/AcademicIdentifiers.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg"></a>
 #+html: <a href="https://coveralls.io/github/tecosaur/AcademicIdentifiers.jl"><img src="https://coveralls.io/repos/github/tecosaur/AcademicIdentifiers.jl/badge.svg"></a>
+#+html: <a href="https://www.tldrlegal.com/license/mozilla-public-license-2-0-mpl-2"><img src="https://img.shields.io/badge/license-MPL%202.0-teal.svg"></a>
 #+html: <a href="https://liberapay.com/tec"><img src="https://shields.io/badge/support%20my%20efforts-f6c915?logo=Liberapay&logoColor=black"></a>
 
 Structured and validated types for common identifiers used in/around academic
-work. See [[https://code.tecosaur.net/tec/DigitalIdentifiersBase.jl][DigitalIdentifiersBase.jl]] for the motivation of identifier-types
-packages, and the identifier API.
+work. See [[https://code.tecosaur.net/tec/FastIdentifiers.jl][FastIdentifiers.jl]] for the motivation of identifier-types packages,
+and the identifier API.
 
 * Implemented identifiers
 
-+ ~ArXiv~
-+ ~DOI~
-+ ~ISNI~
-+ ~ISSN~
-+ ~ISBN~
-+ ~OCN~
-+ ~ORCID~
-+ ~OpenAlexID~
-+ ~RAiD~
-+ ~ROR~
-+ ~PMID~
-+ ~PMCID~
-+ ~VIAF~
-+ ~Wikidata~
++ ~ArXiv~: arXiv preprint identifiers
++ ~DOI~: Digital Object Identifiers
++ ~EAN13~: European Article Numbers (13-digit barcodes)
++ ~ISBN~: International Standard Book Numbers
++ ~ISNI~: International Standard Name Identifiers
++ ~ISSN~: International Standard Serial Numbers
++ ~OCN~: OCLC Control Numbers
++ ~OpenAlexID~: OpenAlex entity identifiers
++ ~ORCID~: Open Researcher and Contributor Identifiers
++ ~PMCID~: PubMed Central Identifiers
++ ~PMID~: PubMed Identifiers
++ ~RAiD~: Research Activity Identifiers
++ ~ROR~: Research Organization Registry identifiers
++ ~VIAF~: Virtual International Authority File identifiers
++ ~Wikidata~: Wikidata entity identifiers
 
 * Example usage
 
@@ -36,7 +39,7 @@ julia> doi = parse(DOI, "10.1371/journal.pone.0068810")
 DOI:10.1371/journal.pone.0068810
 
 julia> string(doi)
-"10.1371/journal.pone.0068810"
+"doi:10.1371/journal.pone.0068810"
 
 julia> purl(doi)
 "https://doi.org/10.1371/journal.pone.0068810"

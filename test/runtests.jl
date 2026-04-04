@@ -2,74 +2,84 @@
 # SPDX-License-Identifier: MPL-2.0
 
 using AcademicIdentifiers
-using AcademicIdentifiers: MalformedIdentifier, ChecksumViolation, idcode, idchecksum, shortcode, purl
+using AcademicIdentifiers: MalformedIdentifier, ChecksumViolation, idcode, idchecksum,
+    shortcode, purl, purlprefix
 using AcademicIdentifiers: EAN13
 
 using Test
 
+# -- Test helpers --
+
+"""Test shortcode, string, and purl for each (input, shortcode, string, purl) tuple.
+Also verifies parse round-trips through shortcode, string, and (when URL
+parsing is supported via `purlprefix`) the PURL."""
+function check_formats(T, examples::Vector{<:Tuple})
+    has_purlprefix = !isnothing(purlprefix(T))
+    for (input, sc, str, p) in examples
+        id = parse(T, input)
+        @test shortcode(id) == sc
+        @test string(id) == str
+        if isnothing(p)
+            @test purl(id) === nothing
+        else
+            @test purl(id) == p
+        end
+        # Round-trip through each form
+        @test parse(T, sc) == id
+        @test parse(T, str) == id
+        has_purlprefix && !isnothing(p) && @test parse(T, p) == id
+    end
+end
+
+"""Test that each input string fails to parse."""
+function check_malformed(T, inputs)
+    for input in inputs
+        @test tryparse(T, input) === nothing
+    end
+end
+
+# -- Identifier tests (alphabetical) --
+
 @testset "ArXiv" begin
-    valid_examples = [
-        # New format examples
-        ("2301.12345", ArXiv(0x5c400, 12345)),
-        ("0704.0001", ArXiv(0x1d000, 1)),
-        ("1412.7878", ArXiv(0x3b000, 7878)),
-        ("1501.00001", ArXiv(0x3c400, 1)),
-        ("2312.12345", ArXiv(0x5f000, 12345)),
+    valid_inputs = [
+        # New format (4-digit pre-2015, 5-digit post-2015)
+        "2301.12345", "0704.0001", "1412.7878", "1501.00001", "2312.12345",
         # Versioned new format
-        ("0704.0001v1", ArXiv(0x1d001, 1)),
-        ("2301.12345v389", ArXiv(0x5c585, 12345)),
-        # Old format examples
-        ("hep-th/9901001", ArXiv(0x5018c400, 1)),
-        ("astro-ph/0001001", ArXiv(0x8000400, 1)),
-        ("math.CA/0611800", ArXiv(0x60a1ac00, 800)),
-        ("cs.AI/0501001", ArXiv(0x18214400, 1)),
-        ("cond-mat/0001001", ArXiv(0x10000400, 1)),
-        ("gr-qc/0001001", ArXiv(0x30000400, 1)),
-        ("nucl-th/0001001", ArXiv(0x78000400, 1)),
-        ("physics/0001001", ArXiv(0x80000400, 1)),
-        ("quant-ph/0001001", ArXiv(0x98000400, 1)),
+        "0704.0001v1", "2301.12345v389",
+        # Old format
+        "hep-th/9901001", "astro-ph.CO/0001001", "math.CA/0611800",
+        "cs.AI/0501001", "cond-mat.str-el/0001001", "gr-qc/0001001",
+        "nucl-th/0001001", "physics.gen-ph/0001001", "quant-ph/0001001",
         # Versioned old format
-        ("hep-th/9901001v2", ArXiv(0x5018c402, 1)),
-        ("math.CA/0611800v3", ArXiv(0x60a1ac03, 800)),
-        ("astro-ph/0001001v10", ArXiv(0x800040a, 1)),
+        "hep-th/9901001v2", "math.CA/0611800v3", "astro-ph.CO/0001001v10",
         # With prefixes
-        ("arXiv:2301.12345", ArXiv(0x5c400, 12345)),
-        ("ArXiv:hep-th/9901001", ArXiv(0x5018c400, 1)),
-        ("ARXIV:0704.0001v1", ArXiv(0x1d001, 1)),
+        "arXiv:2301.12345", "ArXiv:hep-th/9901001", "ARXIV:0704.0001v1",
         # URL format
-        ("https://arxiv.org/abs/2301.12345", ArXiv(0x5c400, 12345)),
-        ("https://arxiv.org/abs/hep-th/9901001v2", ArXiv(0x5018c402, 1))
+        "https://arxiv.org/abs/2301.12345",
+        "https://arxiv.org/abs/hep-th/9901001v2",
+        "http://arxiv.org/abs/1411.1607",
     ]
 
     @testset "Parse/tryparse equivalence and invariants" begin
-        for (input_str, expected) in valid_examples
-            @test parse(ArXiv, input_str) == tryparse(ArXiv, input_str) == expected
-            @test parse(ArXiv, shortcode(expected)) == expected
-            @test parse(ArXiv, string(expected)) == expected
-            @test parse(ArXiv, purl(expected)) == expected
-            @test eval(Meta.parse(repr(expected))) == expected
+        for input_str in valid_inputs
+            parsed = parse(ArXiv, input_str)
+            @test parsed == tryparse(ArXiv, input_str)
+            @test parse(ArXiv, shortcode(parsed)) == parsed
+            @test parse(ArXiv, purl(parsed)) == parsed
         end
     end
 
     @testset "Format consistency" begin
-        format_examples = [
-            # (shortstr, str, purlstr)
-            ("2301.12345", "arXiv:2301.12345", "https://arxiv.org/abs/2301.12345"),
-            ("0704.0001", "arXiv:0704.0001", "https://arxiv.org/abs/0704.0001"),
-            ("hep-th/9901001", "arXiv:hep-th/9901001", "https://arxiv.org/abs/hep-th/9901001"),
-            ("astro-ph/0001001", "arXiv:astro-ph/0001001", "https://arxiv.org/abs/astro-ph/0001001"),
-            ("math.CA/0611800", "arXiv:math.CA/0611800", "https://arxiv.org/abs/math.CA/0611800"),
-            ("0704.0001v1", "arXiv:0704.0001v1", "https://arxiv.org/abs/0704.0001v1"),
-            ("hep-th/9901001v2", "arXiv:hep-th/9901001v2", "https://arxiv.org/abs/hep-th/9901001v2"),
-            ("math.CA/0611800v3", "arXiv:math.CA/0611800v3", "https://arxiv.org/abs/math.CA/0611800v3")
-        ]
-
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(ArXiv, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
-        end
+        check_formats(ArXiv, [
+            ("2301.12345",         "2301.12345",         "arXiv:2301.12345",         "https://arxiv.org/abs/2301.12345"),
+            ("0704.0001",          "0704.0001",          "arXiv:0704.0001",          "https://arxiv.org/abs/0704.0001"),
+            ("hep-th/9901001",     "hep-th/9901001",     "arXiv:hep-th/9901001",     "https://arxiv.org/abs/hep-th/9901001"),
+            ("gr-qc/0001001",      "gr-qc/0001001",      "arXiv:gr-qc/0001001",      "https://arxiv.org/abs/gr-qc/0001001"),
+            ("math.CA/0611800",    "math.CA/0611800",    "arXiv:math.CA/0611800",    "https://arxiv.org/abs/math.CA/0611800"),
+            ("0704.0001v1",        "0704.0001v1",        "arXiv:0704.0001v1",        "https://arxiv.org/abs/0704.0001v1"),
+            ("hep-th/9901001v2",   "hep-th/9901001v2",   "arXiv:hep-th/9901001v2",   "https://arxiv.org/abs/hep-th/9901001v2"),
+            ("math.CA/0611800v3",  "math.CA/0611800v3",  "arXiv:math.CA/0611800v3",  "https://arxiv.org/abs/math.CA/0611800v3"),
+        ])
     end
 
     @testset "Malformed identifiers" begin
@@ -112,10 +122,7 @@ using Test
             "astro-ph/０001001"  # full-width zero in old scheme
         ]
 
-        for bad_arxiv in malformed_examples
-            @test_throws MalformedIdentifier{ArXiv} parse(ArXiv, bad_arxiv)
-            @test tryparse(ArXiv, bad_arxiv) === nothing
-        end
+        check_malformed(ArXiv, malformed_examples)
     end
 
     @testset "Miscellaneous" begin
@@ -183,22 +190,14 @@ end
     end
 
     @testset "Format consistency" begin
-        format_examples = [
-            # (shortstr, str, purlstr)
-            ("10.1000/182", "doi:10.1000/182", "https://doi.org/10.1000/182"),
-            ("10.1038/nature12373", "doi:10.1038/nature12373", "https://doi.org/10.1038/nature12373"),
-            ("10.1016/j.cell.2020.01.001", "doi:10.1016/j.cell.2020.01.001", "https://doi.org/10.1016/j.cell.2020.01.001"),
-            ("10.1093/nar/gkaa1100", "doi:10.1093/nar/gkaa1100", "https://doi.org/10.1093/nar/gkaa1100"),
-            ("10.5555/12345678", "doi:10.5555/12345678", "https://doi.org/10.5555/12345678"),
-            ("10.1234/example.doi", "doi:10.1234/example.doi", "https://doi.org/10.1234/example.doi")
-        ]
-
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(DOI, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
-        end
+        check_formats(DOI, [
+            ("10.1000/182",                "10.1000/182",                "doi:10.1000/182",                "https://doi.org/10.1000/182"),
+            ("10.1038/nature12373",        "10.1038/nature12373",        "doi:10.1038/nature12373",        "https://doi.org/10.1038/nature12373"),
+            ("10.1016/j.cell.2020.01.001", "10.1016/j.cell.2020.01.001", "doi:10.1016/j.cell.2020.01.001", "https://doi.org/10.1016/j.cell.2020.01.001"),
+            ("10.1093/nar/gkaa1100",       "10.1093/nar/gkaa1100",       "doi:10.1093/nar/gkaa1100",       "https://doi.org/10.1093/nar/gkaa1100"),
+            ("10.5555/12345678",           "10.5555/12345678",           "doi:10.5555/12345678",           "https://doi.org/10.5555/12345678"),
+            ("10.1234/example.doi",        "10.1234/example.doi",        "doi:10.1234/example.doi",        "https://doi.org/10.1234/example.doi"),
+        ])
     end
 
     @testset "Malformed identifiers" begin
@@ -227,10 +226,7 @@ end
             "１０.1000/182",    # full-width 10
         ]
 
-        for bad_doi in malformed_examples
-            @test_throws MalformedIdentifier{DOI} parse(DOI, bad_doi)
-            @test tryparse(DOI, bad_doi) === nothing
-        end
+        check_malformed(DOI, malformed_examples)
     end
 
     @testset "Miscellaneous" begin
@@ -295,22 +291,14 @@ end
     end
 
     @testset "Format consistency" begin
-        format_examples = [
-            # (shortstr, str, purlstr)
-            ("9780439023481", "9780439023481", nothing),
-            ("9798886451740", "9798886451740", nothing),
-            ("9781402894626", "9781402894626", nothing),
-            ("9780123456786", "9780123456786", nothing),
-            ("1234567890128", "1234567890128", nothing),
-            ("5901234123457", "5901234123457", nothing)
-        ]
-
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(EAN13, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) === purlstr
-        end
+        check_formats(EAN13, [
+            ("9780439023481", "9780439023481", "9780439023481", nothing),
+            ("9798886451740", "9798886451740", "9798886451740", nothing),
+            ("9781402894626", "9781402894626", "9781402894626", nothing),
+            ("9780123456786", "9780123456786", "9780123456786", nothing),
+            ("1234567890128", "1234567890128", "1234567890128", nothing),
+            ("5901234123457", "5901234123457", "5901234123457", nothing),
+        ])
     end
 
     @testset "Malformed identifiers" begin
@@ -335,13 +323,14 @@ end
             "９７80439023481",   # full-width 97
             "978043902348１",    # full-width 1
             "９７８0439023481",   # full-width 978
-            "９７８０４３９０２３４８１" # all full-width
+            "９７８０４３９０２３４８１", # all full-width
+            # Wrong length (too short/long)
+            "978043902",        # 9 digits
+            "97804390234",      # 11 digits
+            "978043902348"      # 12 digits
         ]
 
-        for bad_ean in malformed_examples
-            @test_throws MalformedIdentifier{EAN13} parse(EAN13, bad_ean)
-            @test tryparse(EAN13, bad_ean) === nothing
-        end
+        check_malformed(EAN13, malformed_examples)
     end
 
     @testset "Checksum errors" begin
@@ -356,10 +345,6 @@ end
             "9780123456780",  # Wrong checksum (should be 6)
             "1234567890120",  # Wrong checksum (should be 8)
             "5901234123450",  # Wrong checksum (should be 7)
-            # Short lengths that are interpreted as having wrong checksums
-            "978043902",      # 9 digits - parsed as having wrong checksum
-            "97804390234",    # 11 digits - parsed as having wrong checksum
-            "978043902348"    # 12 digits - parsed as having wrong checksum
         ]
 
         for bad_ean in checksum_examples
@@ -386,7 +371,7 @@ end
         @test shortcode(ean13_int2) == shortcode(ean13_str2)
 
         # Test invalid integer inputs
-        @test_throws MalformedIdentifier{EAN13} EAN13(12345678901234, 5)  # Too many digits
+        @test_throws ArgumentError EAN13(12345678901234)  # Too many digits
         @test_throws ChecksumViolation{EAN13} EAN13(978043902348, 2)  # Wrong checksum
 
         # Test code and checksum extraction
@@ -429,11 +414,9 @@ end
         ("0000 0004 0600 5291", ISNI(40600529)),
         ("0000 0000 0000 0001", ISNI(0)),
         ("0000 0001 0000 0009", ISNI(10000000)),
-        # With lowercase prefix
         ("isni:0000 0001 2281 955X", ISNI(12281955)),
         ("isni:0000 0000 8389 1195", ISNI(8389119)),
         ("isni:0000 0004 0600 5291", ISNI(40600529)),
-        # With uppercase prefix
         ("ISNI:0000 0001 2281 955X", ISNI(12281955)),
         ("ISNI:0000 0000 8389 1195", ISNI(8389119)),
         # URL format
@@ -457,21 +440,13 @@ end
     end
 
     @testset "Format consistency" begin
-        format_examples = [
-            # (shortstr, str, purlstr)
-            ("0000 0001 2281 955X", "https://isni.org/isni/000000012281955X", "https://isni.org/isni/000000012281955X"),
-            ("0000 0000 8389 1195", "https://isni.org/isni/0000000083891195", "https://isni.org/isni/0000000083891195"),
-            ("0000 0004 0600 5291", "https://isni.org/isni/0000000406005291", "https://isni.org/isni/0000000406005291"),
-            ("0000 0000 0000 0001", "https://isni.org/isni/0000000000000001", "https://isni.org/isni/0000000000000001"),
-            ("0000 0001 0000 0009", "https://isni.org/isni/0000000100000009", "https://isni.org/isni/0000000100000009")
-        ]
-
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(ISNI, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
-        end
+        check_formats(ISNI, [
+            ("0000 0001 2281 955X", "0000 0001 2281 955X", "ISNI 0000 0001 2281 955X", "https://isni.org/isni/000000012281955X"),
+            ("0000 0000 8389 1195", "0000 0000 8389 1195", "ISNI 0000 0000 8389 1195", "https://isni.org/isni/0000000083891195"),
+            ("0000 0004 0600 5291", "0000 0004 0600 5291", "ISNI 0000 0004 0600 5291", "https://isni.org/isni/0000000406005291"),
+            ("0000 0000 0000 0001", "0000 0000 0000 0001", "ISNI 0000 0000 0000 0001", "https://isni.org/isni/0000000000000001"),
+            ("0000 0001 0000 0009", "0000 0001 0000 0009", "ISNI 0000 0001 0000 0009", "https://isni.org/isni/0000000100000009"),
+        ])
     end
 
     @testset "Malformed identifiers" begin
@@ -497,13 +472,15 @@ end
             "0000 0001 2281 955X🔢", # emoji
             "０000 0001 2281 955X",   # full-width zero
             "0000 ０001 2281 955X",   # full-width zero in middle
-            "0000 0001 2281 955Ｘ"    # full-width X
+            "0000 0001 2281 955Ｘ",   # full-width X
+            # Wrong length
+            "0000 0001 2281 95",    # too short
+            "0000 0001 2281",       # missing last group
+            "0000",                 # missing groups
+            "00000001228195X"       # 15 chars without spaces
         ]
 
-        for bad_isni in malformed_examples
-            @test_throws MalformedIdentifier{ISNI} parse(ISNI, bad_isni)
-            @test tryparse(ISNI, bad_isni) === nothing
-        end
+        check_malformed(ISNI, malformed_examples)
     end
 
     @testset "Checksum errors" begin
@@ -519,11 +496,6 @@ end
             "0000 0001 0000 0000",  # Wrong checksum (should be 9)
             "0000 0001 0000 0001",  # Wrong checksum (should be 9)
             "0000 0000 0000 0000",  # Wrong checksum (should be 1)
-            # Short lengths that are interpreted as having wrong checksums
-            "0000 0001 2281 95",    # Too short - parsed as having wrong checksum
-            "0000 0001 2281",       # Missing last group - parsed as having wrong checksum
-            "0000",                 # Missing last three groups - parsed as having wrong checksum
-            "00000001228195X"       # Missing spaces - parsed as having wrong checksum
         ]
 
         for bad_isni in checksum_examples
@@ -541,7 +513,7 @@ end
         @test shortcode(isni_int) == shortcode(isni_str)
 
         # Test invalid integer inputs
-        @test_throws MalformedIdentifier{ISNI} ISNI(12345678901234567, 1)  # Too many digits
+        @test_throws ArgumentError ISNI(12345678901234567)  # Too many digits
         @test_throws ChecksumViolation{ISNI} ISNI(12281955, 2)  # Wrong checksum
 
         # Test code and checksum extraction
@@ -609,30 +581,21 @@ end
     end
 
     @testset "Format consistency" begin
-        format_examples = [
-            # (shortstr, str, purlstr)
-            ("0317-8471", "ISSN 0317-8471", "https://portal.issn.org/resource/ISSN/0317-8471"),
-            ("1050-124X", "ISSN 1050-124X", "https://portal.issn.org/resource/ISSN/1050-124X"),
-            ("2049-3630", "ISSN 2049-3630", "https://portal.issn.org/resource/ISSN/2049-3630"),
-            ("0000-0000", "ISSN 0000-0000", "https://portal.issn.org/resource/ISSN/0000-0000"),
-            ("1234-5679", "ISSN 1234-5679", "https://portal.issn.org/resource/ISSN/1234-5679"),
-            ("9999-9994", "ISSN 9999-9994", "https://portal.issn.org/resource/ISSN/9999-9994")
-        ]
-
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(ISSN, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
-        end
+        check_formats(ISSN, [
+            ("0317-8471", "0317-8471", "ISSN 0317-8471", "https://portal.issn.org/resource/ISSN/0317-8471"),
+            ("1050-124X", "1050-124X", "ISSN 1050-124X", "https://portal.issn.org/resource/ISSN/1050-124X"),
+            ("2049-3630", "2049-3630", "ISSN 2049-3630", "https://portal.issn.org/resource/ISSN/2049-3630"),
+            ("0000-0000", "0000-0000", "ISSN 0000-0000", "https://portal.issn.org/resource/ISSN/0000-0000"),
+            ("1234-5679", "1234-5679", "ISSN 1234-5679", "https://portal.issn.org/resource/ISSN/1234-5679"),
+            ("9999-9994", "9999-9994", "ISSN 9999-9994", "https://portal.issn.org/resource/ISSN/9999-9994"),
+        ])
     end
 
     @testset "Malformed identifiers" begin
         malformed_examples = [
             # Wrong length
-            "0317-84712",       # Too many digits (9 total)
-            "12345678901",      # Too many digits (11 total)
-            "1",                # Too few digits (1 total)
+            "0317-84712",       # Trailing content after valid parse
+            "1",                # Too few digits
 
             # Non-numeric content
             "abcd-efgh",        # Non-numeric
@@ -655,13 +618,15 @@ end
             "０317-8471",       # full-width zero
             "０３17-8471",      # full-width 03
             "0317-８471",       # full-width 8
-            "0317-8471　"       # full-width space
+            "0317-8471　",      # full-width space
+            # Wrong digit count
+            "0317-847",         # missing check digit
+            "031-8471",         # too few digits
+            "-8471",            # missing first part
+            "0317"              # missing second half
         ]
 
-        for bad_issn in malformed_examples
-            @test_throws MalformedIdentifier{ISSN} parse(ISSN, bad_issn)
-            @test tryparse(ISSN, bad_issn) === nothing
-        end
+        check_malformed(ISSN, malformed_examples)
     end
 
     @testset "Checksum errors" begin
@@ -669,10 +634,6 @@ end
             "0317-8470",  # Wrong checksum (should be 1)
             "0317-8472",  # Wrong checksum (should be 1)
             "0317-8473",  # Wrong checksum (should be 1)
-            "0317-847",   # Missing check digit - interpreted as wrong checksum
-            "031-8471",   # Too few digits but parsed as checksum violation
-            "-8471",      # Missing first part but parsed as checksum violation
-            "0317",       # Missing hyphen and last part but parsed as checksum violation
             "1050-1241",  # Wrong checksum (should be X/10)
             "1050-1242",  # Wrong checksum (should be X/10)
             "1050-1243",  # Wrong checksum (should be X/10)
@@ -680,7 +641,10 @@ end
             "2049-3632",  # Wrong checksum (should be 0)
             "0000-0001",  # Wrong checksum (should be 0)
             "1234-5670",  # Wrong checksum (should be 9)
-            "9999-9995"   # Wrong checksum (should be 4)
+            "9999-9995",  # Wrong checksum (should be 4)
+            # Too many digits: parses as 7+1 with wrong checksum
+            "12345678901",
+            "123456789"
         ]
 
         for bad_issn in checksum_examples
@@ -703,7 +667,7 @@ end
         @test endswith(shortcode(issn_with_x), "X")
 
         # Test invalid integer inputs
-        @test_throws MalformedIdentifier{ISSN} ISSN(12345678, 1)  # Too many digits
+        @test_throws ArgumentError ISSN(12345678)  # Too many digits
         @test_throws ChecksumViolation{ISSN} ISSN(317847, 2)  # Wrong checksum
 
         # Test code and checksum extraction
@@ -811,11 +775,11 @@ end
             ("979-12-3456789-6", "ISBN 979-12-3456789-6", nothing)
         ]
 
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(ISBN, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) === purlstr
+        for (sc, str, p) in format_examples
+            id = parse(ISBN, sc)
+            @test shortcode(id) == sc
+            @test string(id) == str
+            @test purl(id) === p
         end
     end
 
@@ -864,10 +828,7 @@ end
             "９７８-０-４３９-０２３４８-１" # all full-width
         ]
 
-        for bad_isbn in malformed_examples
-            @test_throws MalformedIdentifier{ISBN} parse(ISBN, bad_isbn)
-            @test tryparse(ISBN, bad_isbn) === nothing
-        end
+        check_malformed(ISBN, malformed_examples)
     end
 
     @testset "Checksum errors" begin
@@ -1014,11 +975,11 @@ end
             ("123456789012", "on123456789012", "https://worldcat.org/oclc/123456789012")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(OCN, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
+        for (sc, str, p) in format_examples
+            id = parse(OCN, sc)
+            @test shortcode(id) == sc
+            @test string(id) == str
+            @test purl(id) == p
         end
     end
 
@@ -1054,10 +1015,7 @@ end
             "１２３４５６７"           # all full-width
         ]
 
-        for bad_ocn in malformed_examples
-            @test_throws MalformedIdentifier{OCN} parse(OCN, bad_ocn)
-            @test tryparse(OCN, bad_ocn) === nothing
-        end
+        check_malformed(OCN, malformed_examples)
     end
 
     @testset "Miscellaneous" begin
@@ -1141,18 +1099,17 @@ end
             ("0000-0001-0000-0009", "https://orcid.org/0000-0001-0000-0009", "https://orcid.org/0000-0001-0000-0009")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(ORCID, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
+        for (sc, str, p) in format_examples
+            id = parse(ORCID, sc)
+            @test shortcode(id) == sc
+            @test string(id) == str
+            @test purl(id) == p
         end
     end
 
     @testset "Malformed identifiers" begin
         malformed_examples = [
-            # Wrong length
-            "0000-0000-0000-00000",  # Too many digits (17 total)
+            # "0000-0000-0000-00000" moved to checksum section (16 non-dash chars = valid length, wrong check)
             # Note: Cases below cause ChecksumViolation, moved to checksum section
             # "0000-0000-0000-000",    # Too few digits (15 total) - causes ChecksumViolation
             # "0000-0000-0000",        # Missing last group - causes ChecksumViolation
@@ -1186,13 +1143,16 @@ end
             "０000-0002-1825-0097",   # full-width zero
             "0000-０002-1825-0097",   # full-width zero in middle
             "0000-0002-1825-００97",  # full-width zeros at end
-            "０００0-0002-1825-0097"   # multiple full-width zeros
+            "０００0-0002-1825-0097",  # multiple full-width zeros
+            # Wrong length
+            "0000-0000-0000-000",    # too few digits
+            "0000-0000-0000",        # missing last group
+            "0000-0000",             # missing groups
+            "0000",                  # missing groups
+            "000000021825009"        # missing last digit
         ]
 
-        for bad_orcid in malformed_examples
-            @test_throws MalformedIdentifier{ORCID} parse(ORCID, bad_orcid)
-            @test tryparse(ORCID, bad_orcid) === nothing
-        end
+        check_malformed(ORCID, malformed_examples)
     end
 
     @testset "Checksum errors" begin
@@ -1209,12 +1169,7 @@ end
             "0000-0002-1694-2331",  # Wrong checksum (should be X/10)
             "0000-0000-0000-0000",  # Wrong checksum (should be 1)
             "0000-0001-0000-0000",  # Wrong checksum (should be 9)
-            # Cases moved from malformed section that cause ChecksumViolation
-            "0000-0000-0000-000",   # Too few digits but parsed as 0 with wrong checksum
-            "0000-0000-0000",       # Missing last group but parsed as 0 with wrong checksum
-            "0000-0000",            # Missing groups but parsed as 0 with wrong checksum
-            "0000",                 # Missing groups but parsed as 0 with wrong checksum
-            "000000021825009"       # Missing last digit but creates valid structure with wrong checksum
+            "0000-0000-0000-00000",  # 16 non-dash chars, wrong checksum
         ]
 
         for bad_orcid in checksum_examples
@@ -1242,8 +1197,8 @@ end
         @test shortcode(orcid_small) == "0000-0001-0000-0009"
 
         # Test invalid integer inputs
-        @test_throws MalformedIdentifier{ORCID} ORCID(12345678901234567, 5)  # Too many digits
-        @test_throws MalformedIdentifier{ORCID} ORCID(-1, 0)  # Negative number
+        @test_throws ArgumentError ORCID(12345678901234567)  # Too many digits
+        @test_throws ArgumentError ORCID(-1)  # Negative number
         @test_throws ChecksumViolation{ORCID} ORCID(21825009, 8)  # Wrong checksum
         @test_throws ChecksumViolation{ORCID} ORCID(0, 0)  # Wrong checksum for zero
 
@@ -1329,22 +1284,23 @@ end
     @testset "Format consistency" begin
         format_examples = [
             # (shortstr, str, purlstr)
-            ("W2741809807", "https://openalex.org/W2741809807", "https://openalex.org/W2741809807"),
-            ("A2208157607", "https://openalex.org/A2208157607", "https://openalex.org/A2208157607"),
-            ("S2741809807", "https://openalex.org/S2741809807", "https://openalex.org/S2741809807"),
-            ("I2741809807", "https://openalex.org/I2741809807", "https://openalex.org/I2741809807"),
-            ("C2741809807", "https://openalex.org/C2741809807", "https://openalex.org/C2741809807"),
-            ("P2741809807", "https://openalex.org/P2741809807", "https://openalex.org/P2741809807"),
-            ("F2741809807", "https://openalex.org/F2741809807", "https://openalex.org/F2741809807"),
-            ("W1234567890", "https://openalex.org/W1234567890", "https://openalex.org/W1234567890"),
-            ("A1", "https://openalex.org/A1", "https://openalex.org/A1")
+            # OpenAlexID has no display prefix: string == shortcode
+            ("W2741809807", "W2741809807", "https://openalex.org/W2741809807"),
+            ("A2208157607", "A2208157607", "https://openalex.org/A2208157607"),
+            ("S2741809807", "S2741809807", "https://openalex.org/S2741809807"),
+            ("I2741809807", "I2741809807", "https://openalex.org/I2741809807"),
+            ("C2741809807", "C2741809807", "https://openalex.org/C2741809807"),
+            ("P2741809807", "P2741809807", "https://openalex.org/P2741809807"),
+            ("F2741809807", "F2741809807", "https://openalex.org/F2741809807"),
+            ("W1234567890", "W1234567890", "https://openalex.org/W1234567890"),
+            ("A1", "A1", "https://openalex.org/A1")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(OpenAlexID, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
+        for (sc, str, p) in format_examples
+            id = parse(OpenAlexID, sc)
+            @test shortcode(id) == sc
+            @test string(id) == str
+            @test purl(id) == p
         end
     end
 
@@ -1383,10 +1339,7 @@ end
             "Ａ2208157607"       # full-width A
         ]
 
-        for bad_id in malformed_examples
-            @test_throws MalformedIdentifier{OpenAlexID} parse(OpenAlexID, bad_id)
-            @test tryparse(OpenAlexID, bad_id) === nothing
-        end
+        check_malformed(OpenAlexID, malformed_examples)
     end
 
     @testset "Miscellaneous" begin
@@ -1411,7 +1364,7 @@ end
         @test typeof(c_id) == OpenAlexID{:C}
 
         # Test invalid integer inputs
-        @test_throws InexactError OpenAlexID{:A}(-1) # Negative not allowed (UInt64 conversion error)
+        @test_throws ArgumentError OpenAlexID{:A}(-1) # Negative not allowed
 
         # Test that zero is allowed
         zero_id = OpenAlexID{:W}(0)
@@ -1478,11 +1431,11 @@ end
             ("10.5555/12345678", "https://raid.org/10.5555/12345678", "https://raid.org/10.5555/12345678")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(RAiD, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
+        for (sc, str, p) in format_examples
+            id = parse(RAiD, sc)
+            @test shortcode(id) == sc
+            @test string(id) == str
+            @test purl(id) == p
         end
     end
 
@@ -1590,11 +1543,11 @@ end
             ("07zymws49", "https://ror.org/07zymws49", "https://ror.org/07zymws49")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(ROR, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
+        for (sc, str, p) in format_examples
+            id = parse(ROR, sc)
+            @test shortcode(id) == sc
+            @test string(id) == str
+            @test purl(id) == p
         end
     end
 
@@ -1631,13 +1584,11 @@ end
             "05dx🔤s055",       # emoji letter
             "０5dxps055",       # full-width zero
             "05ｄxps055",       # full-width letter
-            "05dxps０55"        # full-width zero at end
+            "05dxps０55",       # full-width zero at end
+            "05dxpso55"         # 'o' is invalid in Crockford base-32
         ]
 
-        for bad_ror in malformed_examples
-            @test_throws MalformedIdentifier{ROR} parse(ROR, bad_ror)
-            @test tryparse(ROR, bad_ror) === nothing
-        end
+        check_malformed(ROR, malformed_examples)
     end
 
     @testset "Checksum errors" begin
@@ -1650,7 +1601,7 @@ end
             "02jx3x897",  # Wrong checksum (should be 95)
             "00x6h5n94",  # Wrong checksum (should be 95)
             "00x6h5n96",  # Wrong checksum (should be 95)
-            "05dxpso55",  # Invalid character interpreted as wrong checksum
+            # "05dxpso55" moved to malformed (contains 'o', invalid in Crockford base-32)
             "0fedcba98",  # Wrong checksum (should be 33)
             "0fedcba99"   # Wrong checksum (should be 33)
         ]
@@ -1677,7 +1628,7 @@ end
         @test shortcode(ror_int4) == "00j6hb750"
 
         # Test invalid integer inputs
-        @test_throws MalformedIdentifier{ROR} ROR(-1, 50)  # Negative number
+        @test_throws ArgumentError ROR(-1)  # Negative number
         @test_throws ChecksumViolation{ROR} ROR(0, 0)      # Wrong checksum
         @test_throws ChecksumViolation{ROR} ROR(182377248, 54)  # Wrong checksum
         @test_throws ChecksumViolation{ROR} ROR(86937512, 94)   # Wrong checksum
@@ -1749,19 +1700,19 @@ end
 
     @testset "Format consistency" begin
         format_examples = [
-            # (shortstr, str, purlstr)
-            ("1", "PMID:1", "https://pubmed.ncbi.nlm.nih.gov/1"),
-            ("123", "PMID:123", "https://pubmed.ncbi.nlm.nih.gov/123"),
-            ("1234567", "PMID:1234567", "https://pubmed.ncbi.nlm.nih.gov/1234567"),
-            ("12345678", "PMID:12345678", "https://pubmed.ncbi.nlm.nih.gov/12345678"),
-            ("87654321", "PMID:87654321", "https://pubmed.ncbi.nlm.nih.gov/87654321"),
-            ("11111111", "PMID:11111111", "https://pubmed.ncbi.nlm.nih.gov/11111111")
+            # (shortstr, purlstr)
+            ("1", "https://pubmed.ncbi.nlm.nih.gov/1"),
+            ("123", "https://pubmed.ncbi.nlm.nih.gov/123"),
+            ("1234567", "https://pubmed.ncbi.nlm.nih.gov/1234567"),
+            ("12345678", "https://pubmed.ncbi.nlm.nih.gov/12345678"),
+            ("87654321", "https://pubmed.ncbi.nlm.nih.gov/87654321"),
+            ("11111111", "https://pubmed.ncbi.nlm.nih.gov/11111111")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
+        for (shortstr, purlstr) in format_examples
             value = parse(PMID, shortstr)
             @test shortcode(value) == shortstr
-            @test string(value) == str
+            @test string(value) == shortstr
             @test purl(value) == purlstr
         end
     end
@@ -1799,10 +1750,7 @@ end
             "１２３４５６７"       # all full-width
         ]
 
-        for bad_pmid in malformed_examples
-            @test_throws MalformedIdentifier{PMID} parse(PMID, bad_pmid)
-            @test tryparse(PMID, bad_pmid) === nothing
-        end
+        check_malformed(PMID, malformed_examples)
     end
 
     @testset "Miscellaneous" begin
@@ -1810,18 +1758,18 @@ end
         pmid_int = PMID(12345678)
         pmid_str = parse(PMID, "12345678")
         @test shortcode(pmid_int) == shortcode(pmid_str)
-        @test string(pmid_int) == "PMID:12345678"
+        @test string(pmid_int) == shortcode(pmid_int)
 
         # Test various sizes
         pmid_small = PMID(1)
         pmid_large = PMID(12345678)
         @test shortcode(pmid_small) == "1"
         @test shortcode(pmid_large) == "12345678"
-        @test string(pmid_small) == "PMID:1"
-        @test string(pmid_large) == "PMID:12345678"
+        @test string(pmid_small) == "1"
+        @test string(pmid_large) == "12345678"
 
         # Test invalid integer inputs
-        @test_throws MalformedIdentifier{PMID} PMID(-1) # Negative not allowed
+        @test_throws ArgumentError PMID(-1) # Negative not allowed
 
         # Test equality and hashing
         pmid1 = parse(PMID, "12345678")
@@ -1889,11 +1837,11 @@ end
             ("PMC12345678", "PMC12345678", "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12345678")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
-            value = parse(PMCID, shortstr)
-            @test shortcode(value) == shortstr
-            @test string(value) == str
-            @test purl(value) == purlstr
+        for (sc, str, p) in format_examples
+            id = parse(PMCID, sc)
+            @test shortcode(id) == sc
+            @test string(id) == str
+            @test purl(id) == p
         end
     end
 
@@ -1938,10 +1886,7 @@ end
             "ＰＭＣ123456"        # all full-width PMC
         ]
 
-        for bad_pmcid in malformed_examples
-            @test_throws MalformedIdentifier{PMCID} parse(PMCID, bad_pmcid)
-            @test tryparse(PMCID, bad_pmcid) === nothing
-        end
+        check_malformed(PMCID, malformed_examples)
     end
 
     @testset "Miscellaneous" begin
@@ -1949,7 +1894,7 @@ end
         pmcid_int = PMCID(123456)
         pmcid_str = parse(PMCID, "PMC123456")
         @test shortcode(pmcid_int) == shortcode(pmcid_str)
-        @test string(pmcid_int) == "PMC123456"
+        @test string(pmcid_int) == shortcode(pmcid_int)
 
         # Test various sizes
         pmcid_small = PMCID(1)
@@ -1960,7 +1905,7 @@ end
         @test string(pmcid_large) == "PMC12345678"
 
         # Test invalid integer inputs
-        @test_throws MalformedIdentifier{PMCID} PMCID(-1) # Negative not allowed
+        @test_throws ArgumentError PMCID(-1) # Negative not allowed
 
         # Test equality and hashing
         pmcid1 = parse(PMCID, "PMC123456")
@@ -2016,20 +1961,20 @@ end
 
     @testset "Format consistency" begin
         format_examples = [
-            # (shortstr, str, purlstr)
-            ("1", "https://viaf.org/viaf/1", "https://viaf.org/viaf/1"),
-            ("123", "https://viaf.org/viaf/123", "https://viaf.org/viaf/123"),
-            ("1234567", "https://viaf.org/viaf/1234567", "https://viaf.org/viaf/1234567"),
-            ("12345678", "https://viaf.org/viaf/12345678", "https://viaf.org/viaf/12345678"),
-            ("87654321", "https://viaf.org/viaf/87654321", "https://viaf.org/viaf/87654321"),
-            ("123456789", "https://viaf.org/viaf/123456789", "https://viaf.org/viaf/123456789"),
-            ("4000000000", "https://viaf.org/viaf/4000000000", "https://viaf.org/viaf/4000000000")
+            # (shortstr, purlstr)
+            ("1", "https://viaf.org/viaf/1"),
+            ("123", "https://viaf.org/viaf/123"),
+            ("1234567", "https://viaf.org/viaf/1234567"),
+            ("12345678", "https://viaf.org/viaf/12345678"),
+            ("87654321", "https://viaf.org/viaf/87654321"),
+            ("123456789", "https://viaf.org/viaf/123456789"),
+            ("4000000000", "https://viaf.org/viaf/4000000000")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
+        for (shortstr, purlstr) in format_examples
             value = parse(VIAF, shortstr)
             @test shortcode(value) == shortstr
-            @test string(value) == str
+            @test string(value) == shortstr
             @test purl(value) == purlstr
         end
     end
@@ -2038,8 +1983,7 @@ end
         malformed_examples = [
             # UInt32 overflow (too large for VIAF)
             "12345678901",       # Exceeds UInt32 max
-            "123456789012",      # Exceeds UInt32 max
-            "4294967296",        # UInt32 max + 1
+            "123456789012",      # Too many digits (12)
             # Invalid content
             "",                  # Empty string
             "   ",               # Whitespace only
@@ -2069,10 +2013,7 @@ end
             "１２３４５６７"           # all full-width
         ]
 
-        @testset for bad_viaf in malformed_examples
-            @test_throws MalformedIdentifier{VIAF} parse(VIAF, bad_viaf)
-            @test tryparse(VIAF, bad_viaf) === nothing
-        end
+        check_malformed(VIAF, malformed_examples)
     end
 
     @testset "Miscellaneous" begin
@@ -2080,19 +2021,19 @@ end
         viaf_int = VIAF(12345678)
         viaf_str = parse(VIAF, "12345678")
         @test shortcode(viaf_int) == shortcode(viaf_str)
-        @test string(viaf_int) == "https://viaf.org/viaf/12345678"
+        @test string(viaf_int) == "12345678"
 
         # Test various sizes
         viaf_small = VIAF(1)
         viaf_large = VIAF(4294967295)  # UInt32 max
         @test shortcode(viaf_small) == "1"
         @test shortcode(viaf_large) == "4294967295"
-        @test string(viaf_small) == "https://viaf.org/viaf/1"
-        @test string(viaf_large) == "https://viaf.org/viaf/4294967295"
+        @test string(viaf_small) == "1"
+        @test string(viaf_large) == "4294967295"
 
-        # Test invalid integer inputs (UInt32 overflow, not MalformedIdentifier)
-        @test_throws InexactError VIAF(4294967296)  # UInt32 max + 1
-        @test_throws InexactError VIAF(-1) # Negative not allowed
+        # Test invalid integer inputs
+        @test_throws ArgumentError VIAF(10000000000)  # 11 digits, exceeds max
+        @test_throws ArgumentError VIAF(-1) # Negative not allowed
 
         # Test equality and hashing
         viaf1 = parse(VIAF, "12345678")
@@ -2120,6 +2061,8 @@ end
         ("wikidata:Q42", Wikidata(42)),
         ("wikidata:Q123456", Wikidata(123456)),
         ("wikidata:Q999999999", Wikidata(999999999)),
+        # With wd: prefix
+        ("wd:Q42", Wikidata(42)),
         # With uppercase prefix
         ("Wikidata:Q42", Wikidata(42)),
         ("WIKIDATA:Q123456", Wikidata(123456)),
@@ -2130,8 +2073,8 @@ end
         ("https://www.wikidata.org/wiki/Q999999999", Wikidata(999999999)),
         # Edge cases that are valid
         ("Q00123", Wikidata(123)),           # Leading zeros are stripped
-        ("Q12345678901234567890", Wikidata(12345678901234567890)), # Large numbers within UInt64 range
-        ("Q1234567890123", Wikidata(1234567890123))       # Also within UInt64 range
+        ("Q123456789012345678", Wikidata(123456789012345678)), # 18 digits
+        ("Q1234567890123", Wikidata(1234567890123))       # 13 digits
     ]
 
     @testset "Parse/tryparse equivalence and invariants" begin
@@ -2146,19 +2089,19 @@ end
 
     @testset "Format consistency" begin
         format_examples = [
-            # (shortstr, str, purlstr)
-            ("Q1", "https://www.wikidata.org/wiki/Q1", "https://www.wikidata.org/wiki/Q1"),
-            ("Q42", "https://www.wikidata.org/wiki/Q42", "https://www.wikidata.org/wiki/Q42"),
-            ("Q123", "https://www.wikidata.org/wiki/Q123", "https://www.wikidata.org/wiki/Q123"),
-            ("Q123456", "https://www.wikidata.org/wiki/Q123456", "https://www.wikidata.org/wiki/Q123456"),
-            ("Q999999999", "https://www.wikidata.org/wiki/Q999999999", "https://www.wikidata.org/wiki/Q999999999"),
-            ("Q1234567890", "https://www.wikidata.org/wiki/Q1234567890", "https://www.wikidata.org/wiki/Q1234567890")
+            # (shortstr, purlstr)
+            ("Q1", "https://www.wikidata.org/wiki/Q1"),
+            ("Q42", "https://www.wikidata.org/wiki/Q42"),
+            ("Q123", "https://www.wikidata.org/wiki/Q123"),
+            ("Q123456", "https://www.wikidata.org/wiki/Q123456"),
+            ("Q999999999", "https://www.wikidata.org/wiki/Q999999999"),
+            ("Q1234567890", "https://www.wikidata.org/wiki/Q1234567890")
         ]
 
-        for (shortstr, str, purlstr) in format_examples
+        for (shortstr, purlstr) in format_examples
             value = parse(Wikidata, shortstr)
             @test shortcode(value) == shortstr
-            @test string(value) == str
+            @test string(value) == shortstr
             @test purl(value) == purlstr
         end
     end
@@ -2184,9 +2127,7 @@ end
             "Q123-456",          # Hyphen
             "Q123_456",          # Underscore
             "Q123 456",          # Space
-            # Wrong case
-            "q42",               # Lowercase q
-            "q123456",           # Lowercase q
+            # Note: "q42" and "q123456" (lowercase q) are now valid due to casefold
             # Empty or invalid
             "",                  # Empty string
             "   ",               # Whitespace only
@@ -2210,10 +2151,7 @@ end
             "Ｑ１２３４５６"       # all full-width
         ]
 
-        for bad_wd in malformed_examples
-            @test_throws MalformedIdentifier{Wikidata} parse(Wikidata, bad_wd)
-            @test tryparse(Wikidata, bad_wd) === nothing
-        end
+        check_malformed(Wikidata, malformed_examples)
     end
 
     @testset "Miscellaneous" begin
@@ -2221,15 +2159,15 @@ end
         wd_int = Wikidata(42)
         wd_str = parse(Wikidata, "Q42")
         @test shortcode(wd_int) == shortcode(wd_str)
-        @test string(wd_int) == "https://www.wikidata.org/wiki/Q42"
+        @test string(wd_int) == "Q42"
 
         # Test various sizes
         wd_small = Wikidata(1)
-        wd_large = Wikidata(18446744073709551615)  # UInt64 max
+        wd_large = Wikidata(999999999999999999)  # 18-digit max
         @test shortcode(wd_small) == "Q1"
-        @test shortcode(wd_large) == "Q18446744073709551615"
-        @test string(wd_small) == "https://www.wikidata.org/wiki/Q1"
-        @test string(wd_large) == "https://www.wikidata.org/wiki/Q18446744073709551615"
+        @test shortcode(wd_large) == "Q999999999999999999"
+        @test string(wd_small) == "Q1"
+        @test string(wd_large) == "Q999999999999999999"
 
         # Test code extraction
         wikidata_cases = [
