@@ -847,7 +847,7 @@ end
         ]
 
         for bad_isbn in checksum_examples
-            @test_throws ChecksumViolation{EAN13} parse(ISBN, bad_isbn)
+            @test_throws ChecksumViolation{ISBN} parse(ISBN, bad_isbn)
             @test tryparse(ISBN, bad_isbn) === nothing
         end
     end

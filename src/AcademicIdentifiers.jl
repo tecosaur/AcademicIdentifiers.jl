@@ -261,33 +261,31 @@ function Base.convert(::Type{DOI}, arxiv::ArXiv)
     DOI(SubString(doistr, 1, 8), SubString(doistr, 10))
 end
 
-function Base.parse(::Type{DOI}, id::AbstractString)
+# The identifier, or the error `parse` throws, returned so `tryparse` needn't catch it
+function doi_or_error(id::AbstractString)
     doi = SubString(string(id))
     if !digitstart(doi)
         _, doi = chopprefixes(doi, "doi:", "https://", "http://", "dx.doi.org/", "doi.org/")
     end
-    registrant, object = if '/' in doi
-        split(doi, '/', limit=2)
-    else
-        doi, ""
-    end
-    isempty(object) && throw(MalformedIdentifier{DOI}(doi, ncodeunits(doi), "must contain an object component after the slash"))
+    slash = something(findfirst(==(UInt8('/')), codeunits(doi)), ncodeunits(doi))
+    slash == ncodeunits(doi) && return MalformedIdentifier{DOI}(doi, ncodeunits(doi), "must contain an object component after the slash")
     lastdecimal = 0
-    for (i, char) in enumerate(codeunits(registrant))
+    for i in 1:slash-1
+        char = codeunit(doi, i)
         if char == UInt8('.')
-            i - 1 == lastdecimal && throw(MalformedIdentifier{DOI}(doi, i, "registrant cannot initial or consecutive periods"))
+            i - 1 == lastdecimal && return MalformedIdentifier{DOI}(doi, i, "registrant cannot initial or consecutive periods")
             lastdecimal = i
         elseif char ∉ UInt8('0'):UInt8('9')
-            throw(MalformedIdentifier{DOI}(doi, i, "registrant must be a sequence of digits and periods"))
+            return MalformedIdentifier{DOI}(doi, i, "registrant must be a sequence of digits and periods")
         end
     end
-    lastdecimal == 0 && throw(MalformedIdentifier{DOI}(doi, 1, "registrant must contain at least one period"))
-    DOI(SubString(string(registrant)), SubString(string(object)))
+    lastdecimal == 0 && return MalformedIdentifier{DOI}(doi, 1, "registrant must contain at least one period")
+    own = String(doi)  # one copy, so the identifier doesn't keep its input alive
+    DOI(SubString(own, 1, slash - 1), SubString(own, slash + 1))
 end
 
-function Base.tryparse(::Type{DOI}, id::AbstractString)
-    try parse(DOI, id) catch e; e isa MalformedIdentifier || rethrow(); nothing end
-end
+Base.parse(::Type{DOI}, id::AbstractString) = (r = doi_or_error(id); r isa DOI ? r : throw(r))
+Base.tryparse(::Type{DOI}, id::AbstractString) = (r = doi_or_error(id); r isa DOI ? r : nothing)
 
 purlprefix(::Type{DOI}) = "https://doi.org/"
 shortcode(io::IO, doi::DOI) = print(io, doi.registrant, '/', doi.object)
@@ -416,33 +414,28 @@ function isbn10_checkdigit(code9::Integer)
     0xb - mod1(csum, 0xb)
 end
 
-function Base.parse(::Type{ISBN}, id::AbstractString)
-    id = SubString(string(id))
+function isbn_or_error(id::AbstractString)
     _, id = chopprefixes(id, "isbn:", "isbn")
     ncode = sum(c -> c ∉ (UInt8(' '), UInt8('-')), codeunits(id), init=0)
+    ncode in (10, 13) || return MalformedIdentifier{ISBN}(id, "must be a 10 or 13-digit integer")
+    code = parsedashcode(UInt64, id, ('-', ' '))
+    isnothing(code) && return MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens")
     if ncode == 13
-        code = parsedashcode(UInt64, id, ('-', ' '))
-        isnothing(code) && throw(MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens"))
-        code.check <= 0x9 || throw(MalformedIdentifier{ISBN}(id, "check digit must be 0-9"))
-        ISBN(code.num, code.check)
-    elseif ncode == 10
-        code = parsedashcode(UInt64, id, ('-', ' '))
-        isnothing(code) && throw(MalformedIdentifier{ISBN}(id, "must only consist of digits and hyphens"))
-        code.check <= 0xa || throw(MalformedIdentifier{ISBN}(id, "check digit must be 0-9 or X"))
-        cdigit = isbn10_checkdigit(code.num)
-        cdigit == code.check ||
-            throw(ChecksumViolation{ISBN}(id, cdigit, code.check))
-        # Convert ISBN-10 to ISBN-13 (978 prefix)
-        ean12 = 978 * 10^9 + code.num
-        ISBN(EAN13(ean12), true)
+        code.check <= 0x9 || return MalformedIdentifier{ISBN}(id, "check digit must be 0-9")
+        code.num ÷ 10^9 ∈ (978, 979) || return MalformedIdentifier{ISBN}(id, "must start with 978 or 979")
+        cdigit = mod10(code.num)
+        cdigit == code.check || return ChecksumViolation{ISBN}(id, cdigit, code.check)
+        ISBN(EAN13(code.num, code.check))
     else
-        throw(MalformedIdentifier{ISBN}(id, "must be a 10 or 13-digit integer"))
+        code.check <= 0xa || return MalformedIdentifier{ISBN}(id, "check digit must be 0-9 or X")
+        cdigit = isbn10_checkdigit(code.num)
+        cdigit == code.check || return ChecksumViolation{ISBN}(id, cdigit, code.check)
+        ISBN(EAN13(978 * 10^9 + code.num), true)
     end
 end
 
-function Base.tryparse(::Type{ISBN}, id::AbstractString)
-    try parse(ISBN, id) catch e; e isa Union{MalformedIdentifier, ChecksumViolation} || rethrow(); nothing end
-end
+Base.parse(::Type{ISBN}, id::AbstractString) = (r = isbn_or_error(id); r isa ISBN ? r : throw(r))
+Base.tryparse(::Type{ISBN}, id::AbstractString) = (r = isbn_or_error(id); r isa ISBN ? r : nothing)
 
 Base.:(==)(a::ISBN, b::ISBN) = a.code == b.code
 Base.hash(isbn::ISBN, h::UInt) = hash(isbn.code, h)
@@ -622,9 +615,9 @@ struct OCN <: AcademicIdentifier
     id::UInt64
 end
 
-function Base.parse(::Type{OCN}, id::AbstractString)
+function ocn_or_error(id::AbstractString)
     id = SubString(string(id))
-    isempty(id) && throw(MalformedIdentifier{OCN}(id, "cannot be empty"))
+    isempty(id) && return MalformedIdentifier{OCN}(id, "cannot be empty")
     if first(id) == '('
         _, id = chopprefixes(id, "(ocolc)")
     end
@@ -632,15 +625,14 @@ function Base.parse(::Type{OCN}, id::AbstractString)
         _, id = chopprefixes(id, "ocn:", "oclc:", "ocolc", "oclc", "ocm", "ocn", "on", "https://", "www.", "worldcat.org/oclc/")
     end
     id = lstrip(id)
-    all(isdigit, id) || throw(MalformedIdentifier{OCN}(id, "must only consist of digits"))
+    all(isdigit, id) || return MalformedIdentifier{OCN}(id, "must only consist of digits")
     num = tryparse(UInt64, id)
-    isnothing(num) && throw(MalformedIdentifier{OCN}(id, "must contain only digits"))
+    isnothing(num) && return MalformedIdentifier{OCN}(id, "must contain only digits")
     OCN(num)
 end
 
-function Base.tryparse(::Type{OCN}, id::AbstractString)
-    try parse(OCN, id) catch e; e isa MalformedIdentifier || rethrow(); nothing end
-end
+Base.parse(::Type{OCN}, id::AbstractString) = (r = ocn_or_error(id); r isa OCN ? r : throw(r))
+Base.tryparse(::Type{OCN}, id::AbstractString) = (r = ocn_or_error(id); r isa OCN ? r : nothing)
 
 purlprefix(::Type{OCN}) = "https://worldcat.org/oclc/"
 
@@ -874,18 +866,17 @@ end
 
 Base.convert(::Type{DOI}, raid::RAiD) = raid.id
 
-function Base.parse(::Type{RAiD}, id::AbstractString)
-    id = SubString(string(id))
+function raid_or_error(id::AbstractString)
     chopped, id = chopprefixes(id, "raid:")
     if !chopped
         _, id = chopprefixes(id, "https://", "http://", "raid.org/")
     end
-    RAiD(parse(DOI, id))
+    doi = doi_or_error(id)
+    if doi isa DOI RAiD(doi) else doi end
 end
 
-function Base.tryparse(::Type{RAiD}, id::AbstractString)
-    try parse(RAiD, id) catch e; e isa MalformedIdentifier || rethrow(); nothing end
-end
+Base.parse(::Type{RAiD}, id::AbstractString) = (r = raid_or_error(id); r isa RAiD ? r : throw(r))
+Base.tryparse(::Type{RAiD}, id::AbstractString) = (r = raid_or_error(id); r isa RAiD ? r : nothing)
 
 purlprefix(::Type{RAiD}) = "https://raid.org/"
 
