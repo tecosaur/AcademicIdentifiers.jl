@@ -980,4 +980,17 @@ Wikidata:Q42
        (skip(choice("wikidata:", "wd:")), "Q", :id(digits(1:18))),
        prefix="", purlprefix="https://www.wikidata.org/wiki/")
 
+# Compile the hand-written identifiers' common entry points into the package image;
+# `@defid` types precompile theirs automatically.
+let io = IOBuffer()
+    for (T, example) in ((DOI, "10.1038/nature12373"), (ISBN, "978-1-4028-9462-6"), (OCN, "ocm00045678"),
+                         (RAiD, "10.25.10.1234/a1b2c"), (OpenAlexID, "W2741809807"),
+                         ((OpenAlexID{Symbol(k)}, k * "2741809807") for k in "WASICPF")...)
+        id = parse(T, example)
+        tryparse(T, example); tryparse(T, "")
+        string(id); shortcode(id); purl(id)
+        print(io, id)
+    end
+end
+
 end
