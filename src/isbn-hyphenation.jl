@@ -41,28 +41,30 @@ function getchild(node, ctag)
   nothing
 end
 
+elements(node) = Iterators.filter(c -> nodetype(c) == XML.Element, children(node))
+
 grouphinfo = Pair{Int, Vector{Pair{Int, UnitRange{Int}}}}[]
-for node in children(getchild(getchild(hxml, "ISBNRangeMessage"), "EAN.UCCPrefixes"))
-    prefix = getchild(getchild(node, "Prefix"), nothing).value
+for node in elements(getchild(getchild(hxml, "ISBNRangeMessage"), "EAN.UCCPrefixes"))
+    prefix = value(getchild(getchild(node, "Prefix"), nothing))
     rules = Pair{Int, UnitRange{Int}}[]
-    for rule in children(getchild(node, "Rules"))
-        range = getchild(getchild(rule, "Range"), nothing).value
+    for rule in elements(getchild(node, "Rules"))
+        range = value(getchild(getchild(rule, "Range"), nothing))
         rstart, rstop = split(range, '-', limit=2)
-        length = parse(Int, getchild(getchild(rule, "Length"), nothing).value)
+        length = parse(Int, value(getchild(getchild(rule, "Length"), nothing)))
         push!(rules, length => parse(Int, rstart):parse(Int, rstop))
     end
     push!(grouphinfo, parse(Int, prefix) => rules)
 end
 
 pubhinfo = Dict{Int16, Vector{Pair{Int, Vector{Pair{Int, UnitRange{Int}}}}}}()
-for node in children(getchild(getchild(hxml, "ISBNRangeMessage"), "RegistrationGroups"))
-    prefix = getchild(getchild(node, "Prefix"), nothing).value
-    agency = getchild(getchild(node, "Agency"), nothing).value
+for node in elements(getchild(getchild(hxml, "ISBNRangeMessage"), "RegistrationGroups"))
+    prefix = value(getchild(getchild(node, "Prefix"), nothing))
+    agency = value(getchild(getchild(node, "Agency"), nothing))
     rules = Pair{Int, UnitRange{Int}}[]
-    for rule in children(getchild(node, "Rules"))
-        range = getchild(getchild(rule, "Range"), nothing).value
+    for rule in elements(getchild(node, "Rules"))
+        range = value(getchild(getchild(rule, "Range"), nothing))
         rstart, rstop = split(range, '-', limit=2)
-        length = parse(Int, getchild(getchild(rule, "Length"), nothing).value)
+        length = parse(Int, value(getchild(getchild(rule, "Length"), nothing)))
         push!(rules, length => parse(Int, rstart):parse(Int, rstop))
     end
     p3, prest = if '-' in prefix
