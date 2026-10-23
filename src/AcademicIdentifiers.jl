@@ -115,6 +115,8 @@ Checksums.valid_bytes(::typeof(issn_mod11), nctx::Checksums.NodeCtx) =
     Checksums.valid_bytes(mod11_2, nctx)
 Checksums.print_byte(::typeof(issn_mod11), valexpr, nctx::Checksums.NodeCtx) =
     Checksums.print_byte(mod11_2, valexpr, nctx)
+Checksums.digitweight(::typeof(issn_mod11), k::Int) = k + 2
+Checksums.checkfromsum(::typeof(issn_mod11), sum::Int) = (11 - sum % 11) % 11
 
 function parsedashcode(::Type{I}, str::AbstractString, skip::NTuple{N, Char}) where {I <: Integer, N}
     isempty(str) && return nothing
