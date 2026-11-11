@@ -798,9 +798,14 @@ ERROR: ArgumentError: Value 123456789 is above maximum 99999999
 ```
 """
 @defid(PMCID <: AcademicIdentifier,
-       (skip(choice("https://", "http://"), choice("www.", "pmc."),
-             "ncbi.nlm.nih.gov/pmc/articles/"),
-        skip("pmcid:", " "), skip(print="PMC"), :id(digits(1:8))))
+       (skip(choice("https://", "http://"),
+             choice("pmc.ncbi.nlm.nih.gov/articles/",
+                    "pmc.ncbi.nlm.nih.gov/pmc/articles/",
+                    "www.ncbi.nlm.nih.gov/pmc/articles/",
+                    "ncbi.nlm.nih.gov/pmc/articles/",
+                    "europepmc.org/articles/",
+                    "europepmc.org/pmc/articles/")),
+        skip("pmcid:", " "), skip(print="PMC"), :id(digits(1:8)), skip("/")))
 
 FastIdentifiers.idprefix(::Type{PMCID}) = nothing
 purlprefix(::Type{PMCID}) = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
