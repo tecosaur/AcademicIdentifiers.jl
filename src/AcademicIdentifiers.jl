@@ -656,8 +656,8 @@ end
              choice("https://", "http://"),
              choice("www.openalex.org/", "openalex.org/"),
              choice("works/", "authors/", "sources/", "institutions/",
-                    "concepts/", "publishers/", "funders/")),
-        :category(choice("W", "A", "S", "I", "C", "P", "F")),
+                    "concepts/", "publishers/", "funders/", "topics/", "awards/")),
+        :category(choice("W", "A", "S", "I", "C", "P", "F", "T", "G")),
         :num(digits(1:18))))
 
 purlprefix(::Type{GenericOpenAlexID}) = "https://openalex.org/"
@@ -987,7 +987,7 @@ Wikidata:Q42
 let io = IOBuffer()
     for (T, example) in ((DOI, "10.1038/nature12373"), (ISBN, "978-1-4028-9462-6"), (OCN, "ocm00045678"),
                          (RAiD, "10.25.10.1234/a1b2c"), (OpenAlexID, "W2741809807"),
-                         ((OpenAlexID{Symbol(k)}, k * "2741809807") for k in "WASICPF")...)
+                         ((OpenAlexID{Symbol(k)}, k * "2741809807") for k in "WASICPFTG")...)
         id = parse(T, example)
         tryparse(T, example); tryparse(T, "")
         string(id); shortcode(id); purl(id)
