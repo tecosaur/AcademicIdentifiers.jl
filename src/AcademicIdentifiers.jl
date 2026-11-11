@@ -984,7 +984,8 @@ Wikidata:Q42
 ```
 """
 @defid(Wikidata <: AcademicIdentifier,
-       (skip(choice("wikidata:", "wd:")), "Q", :id(digits(1:18))),
+       (skip(choice("www.wikidata.org/entity/", "wikidata.org/entity/"), choice("wikidata:", "wd:")),
+        "Q", :id(digits(1:18))),
        prefix="", purlprefix="https://www.wikidata.org/wiki/")
 
 # Compile the hand-written identifiers' common entry points into the package image;

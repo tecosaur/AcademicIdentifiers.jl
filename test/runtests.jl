@@ -2069,6 +2069,8 @@ end
         ("WIKIDATA:Q999999999", Wikidata(999999999)),
         # URL format
         ("https://www.wikidata.org/wiki/Q42", Wikidata(42)),
+        ("https://wikidata.org/entity/Q42", Wikidata(42)),
+        ("http://www.wikidata.org/entity/Q42", Wikidata(42)),
         ("https://www.wikidata.org/wiki/Q123456", Wikidata(123456)),
         ("https://www.wikidata.org/wiki/Q999999999", Wikidata(999999999)),
         # Edge cases that are valid
@@ -2141,7 +2143,6 @@ end
             # URL format errors
             "https://www.wikidata.org/wiki/", # Missing Q ID
             "https://www.wikidata.org/wiki/42", # Missing Q prefix in URL
-            "https://wikidata.org/entity/Q42",  # URL parsing issue
             # Unicode edge cases
             "Q42🔢",             # emoji
             "Ｑ42",              # full-width Q
