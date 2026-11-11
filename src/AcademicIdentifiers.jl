@@ -735,7 +735,7 @@ Base.string(@nospecialize(id::OpenAlexID)) = shortcode(id)
 shortcode(io::IO, @nospecialize(id::OpenAlexID)) = shortcode(io, id.inner)
 shortcode(@nospecialize(id::OpenAlexID)) = shortcode(id.inner)
 purlprefix(@nospecialize(_::Type{<:OpenAlexID})) = purlprefix(GenericOpenAlexID)
-idcode(@nospecialize(id::OpenAlexID)) = id.num
+idcode(@nospecialize(id::OpenAlexID)) = id.inner.num
 
 
 ## ORCID
