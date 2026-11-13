@@ -184,9 +184,12 @@ ArXiv:hep-th/9901001v1
 """
 @defid(ArXiv <: AcademicIdentifier,
        (choice(:format,
-            :new => seq(:year(digits(2, pad=2)),
-                        :month(digits(2, min=1, max=12, pad=2)),
-                        ".", :num(digits(4:5, pad=4)),
+            :new => seq(choice(seq(:year(digits(2, min=7, max=14, pad=2)),
+                                   :month(digits(2, min=1, max=12, pad=2)),
+                                   ".", :num(digits(4, pad=4))),
+                               seq(:year(digits(2, min=15, pad=2)),
+                                   :month(digits(2, min=1, max=12, pad=2)),
+                                   ".", :num(digits(5, pad=5)))),
                         optional("v", :ver(digits(max=1023)))),
             :old => seq(choice(:archive,
                 :astro_ph => seq("astro-ph.", :class(choice("CO", "EP", "GA", "HE", "IM", "SR"))),
@@ -211,7 +214,7 @@ ArXiv:hep-th/9901001v1
                 :stat     => seq("stat.", :class(choice("AP", "CO", "ME", "ML", "OT", "TH")))),
               "/", :year(digits(2, pad=2, exclude=8:90)),
               :month(digits(2, min=1, max=12, pad=2)),
-              :num(digits(3:4, pad=3)),
+              :num(digits(3, pad=3)),
               optional("v", :ver(digits(max=1023)))))),
        prefix="arXiv:", purlprefix="https://arxiv.org/abs/")
 

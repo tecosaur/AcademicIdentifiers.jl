@@ -73,7 +73,10 @@ end
         check_formats(ArXiv, [
             ("2301.12345",         "2301.12345",         "arXiv:2301.12345",         "https://arxiv.org/abs/2301.12345"),
             ("0704.0001",          "0704.0001",          "arXiv:0704.0001",          "https://arxiv.org/abs/0704.0001"),
-            ("hep-th/9901001",     "hep-th/9901001",     "arXiv:hep-th/9901001",     "https://arxiv.org/abs/hep-th/9901001"),
+            ("1412.0001",          "1412.0001",          "arXiv:1412.0001",          "https://arxiv.org/abs/1412.0001"),
+            ("1501.00001",         "1501.00001",         "arXiv:1501.00001",         "https://arxiv.org/abs/1501.00001"),
+            ("2101.01234v2",       "2101.01234v2",       "arXiv:2101.01234v2",       "https://arxiv.org/abs/2101.01234v2"),
+            ("hep-th/9901001",    "hep-th/9901001",     "arXiv:hep-th/9901001",     "https://arxiv.org/abs/hep-th/9901001"),
             ("gr-qc/0001001",      "gr-qc/0001001",      "arXiv:gr-qc/0001001",      "https://arxiv.org/abs/gr-qc/0001001"),
             ("math.CA/0611800",    "math.CA/0611800",    "arXiv:math.CA/0611800",    "https://arxiv.org/abs/math.CA/0611800"),
             ("0704.0001v1",        "0704.0001v1",        "arXiv:0704.0001v1",        "https://arxiv.org/abs/0704.0001v1"),
@@ -93,8 +96,12 @@ end
             "1399.12345",        # Invalid month (99)
             "2301.",             # Missing paper number
             ".12345",            # Missing year/month
+            "2101.0001",         # 4-digit number from 2015 onwards
+            "1412.00001",        # 5-digit number before 2015
+            "0612.0001",         # Predates the new scheme
             # Old scheme malformed
             "astro-ph/001",      # Wrong number length
+            "hep-th/99010001",   # Wrong number length
             "bad-cat/0001001",   # Invalid category
             "astro-ph/000100a",  # Non-numeric number
             "astro-ph0001001",   # Missing slash
@@ -137,6 +144,8 @@ end
         # Version should be stripped for DOI conversion
         doi_versioned = convert(DOI, arxiv_versioned)
         @test shortcode(doi_versioned) == "10.48550/arXiv.2301.12345"
+
+        @test shortcode(convert(DOI, parse(ArXiv, "2101.00001v3"))) == "10.48550/arXiv.2101.00001"
 
         doi_old = convert(DOI, arxiv_old)
         @test shortcode(doi_old) == "10.48550/arXiv.hep-th/9901001"
